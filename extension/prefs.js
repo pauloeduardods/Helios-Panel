@@ -145,8 +145,9 @@ function comboRow(settings, key, title, options) {
     const row = new Adw.ComboRow({
         title,
         model: Gtk.StringList.new(options.map(([, label]) => label)),
-        selected: options.findIndex(([value]) => value === current),
     });
+    // Set after construction so it cannot be applied before the model.
+    row.selected = options.findIndex(([value]) => value === current);
     row.connect('notify::selected', () => {
         const option = options[row.selected];
         if (option)

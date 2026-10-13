@@ -62,6 +62,8 @@ class HeliosIndicator extends PanelMenu.Button {
         this._destroyed = false;
         this._refreshing = false;
         this._timerId = 0;
+        this._readbackId = 0;
+        this._refreshPending = false;
         this._switchMode = SwitchMode.NONE;
         this._profileMenuKey = '';
         this._lighting = null;
@@ -78,7 +80,9 @@ class HeliosIndicator extends PanelMenu.Button {
                 this._refresh();
             }
         });
-        this.connect('destroy', () => this._onDestroy());
+        // Not named _onDestroy: PanelMenu.ButtonBox already connects 'destroy' to
+        // this._onDestroy, and overriding it would skip destroying the menu.
+        this.connect('destroy', () => this._cleanup());
 
         this._restartTimer();
         this._updateSwitchMode();
@@ -172,8 +176,13 @@ class HeliosIndicator extends PanelMenu.Button {
     }
 
     async _refresh() {
-        if (this._refreshing || this._destroyed)
+        if (this._destroyed)
             return;
+        if (this._refreshing) {
+            // A settings change during an in-flight GPU read must not be lost.
+            this._refreshPending = true;
+            return;
+        }
         this._refreshing = true;
         try {
             this._renderCpu(this._cpu.read());
@@ -188,6 +197,10 @@ class HeliosIndicator extends PanelMenu.Button {
                 console.error('[helios-panel] refresh failed:', e);
         } finally {
             this._refreshing = false;
+        }
+        if (this._refreshPending && !this._destroyed) {
+            this._refreshPending = false;
+            this._refresh();
         }
     }
 
@@ -337,7 +350,10 @@ class HeliosIndicator extends PanelMenu.Button {
             Main.notify('Helios Panel', `Não foi possível mudar o perfil: ${e.message}`);
         }
         // The firmware applies the change asynchronously; read it back shortly.
-        GLib.timeout_add(GLib.PRIORITY_DEFAULT, 300, () => {
+        if (this._readbackId)
+            GLib.source_remove(this._readbackId);
+        this._readbackId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 300, () => {
+            this._readbackId = 0;
             if (!this._destroyed)
                 this._renderProfile(this._platform.state());
             return GLib.SOURCE_REMOVE;
@@ -368,12 +384,16 @@ class HeliosIndicator extends PanelMenu.Button {
         this._refresh();
     }
 
-    _onDestroy() {
+    _cleanup() {
         this._destroyed = true;
         this._cancellable.cancel();
         if (this._timerId) {
             GLib.source_remove(this._timerId);
             this._timerId = 0;
+        }
+        if (this._readbackId) {
+            GLib.source_remove(this._readbackId);
+            this._readbackId = 0;
         }
         if (this._settingsId) {
             this._settings.disconnect(this._settingsId);

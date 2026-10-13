@@ -30,7 +30,7 @@ export const SwitchMode = Object.freeze({
 
 export class PlatformProfileBackend {
     constructor() {
-        this._ppd = null; // resolved service, or false once known absent
+        this._ppd = null; // resolved service; absence is not cached (daemon may start later)
     }
 
     /** {available, current, choices, driver} - cheap, call on every refresh. */
@@ -69,8 +69,8 @@ export class PlatformProfileBackend {
     }
 
     async _findPpd() {
-        if (this._ppd !== null)
-            return this._ppd || null;
+        if (this._ppd)
+            return this._ppd;
         for (const svc of PPD_SERVICES) {
             try {
                 const reply = await Gio.DBus.system.call(
@@ -85,7 +85,6 @@ export class PlatformProfileBackend {
                 console.warn(`[helios-panel] D-Bus lookup of ${svc.name} failed: ${e.message}`);
             }
         }
-        this._ppd = false;
         return null;
     }
 }
