@@ -1,0 +1,8 @@
+{
+  "uuid": "helios-panel@paulo",
+  "name": "Helios Panel",
+  "description": "Temperatura da CPU e GPU e o perfil de energia do notebook na barra superior, com cores configuráveis. Pensado para o Acer Predator Helios Neo 16, funciona em qualquer PC com sensores hwmon.",
+  "shell-version": ["46", "47", "48", "49", "50"],
+  "settings-schema": "org.gnome.shell.extensions.helios-panel",
+  "version-name": "0.1.0"
+}

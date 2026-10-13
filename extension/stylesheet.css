@@ -1,0 +1,23 @@
+.helios-panel-box {
+    spacing: 10px;
+}
+
+.helios-segment {
+    spacing: 3px;
+}
+
+.helios-icon {
+    icon-size: 14px;
+}
+
+.helios-hot {
+    font-weight: bold;
+}
+
+.helios-menu-value {
+    font-weight: bold;
+}
+
+.helios-menu-dim {
+    color: rgba(255, 255, 255, 0.55);
+}

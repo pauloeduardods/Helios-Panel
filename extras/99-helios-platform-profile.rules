@@ -1,0 +1,18 @@
+# OPCIONAL - Helios Panel
+# Deixa o grupo "sudo" (os administradores no Ubuntu) trocar o perfil de
+# energia escrevendo direto no arquivo do kernel, sem senha. Com isso o menu
+# da extensão mostra todos os perfis do firmware (Eco, Quiet, Balanced,
+# Performance, Turbo) em vez dos 3 do power-profiles-daemon.
+#
+# Risco: qualquer programa rodando como um usuário do grupo sudo pode trocar
+# o perfil. Os perfis são validados pelo firmware da Acer (os mesmos da tecla
+# de modo), então o pior caso é o notebook ir para o Turbo e ficar barulhento.
+#
+# Instalar:
+#   sudo cp 99-helios-platform-profile.rules /etc/udev/rules.d/
+#   sudo udevadm control --reload
+#   sudo modprobe -r acer_wmi && sudo modprobe acer_wmi   (ou reinicie)
+# Conferir (deve aparecer "-rw-rw-r-- root sudo"):
+#   ls -l /sys/class/platform-profile/*/profile
+
+ACTION=="add", SUBSYSTEM=="platform-profile", RUN+="/usr/bin/chgrp sudo /sys%p/profile", RUN+="/usr/bin/chmod g+w /sys%p/profile"
