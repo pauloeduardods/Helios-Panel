@@ -1,0 +1,14 @@
+[package]
+name = "helios-sys"
+description = "Real I/O adapters for helios-core: rooted sysfs access, nvidia-smi runner, clock"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+helios-core.workspace = true
+
+[lints]
+workspace = true

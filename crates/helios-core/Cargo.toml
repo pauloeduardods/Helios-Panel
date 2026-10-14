@@ -1,0 +1,22 @@
+[package]
+name = "helios-core"
+description = "Pure sensor, GPU power-gating and platform-profile logic for Helios (no I/O)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[features]
+# In-memory fake sysfs, fake nvidia-smi and fake clock, plus fixture trees.
+# Enabled by the other crates' tests; never by a shipped binary.
+fake = []
+
+[dependencies]
+serde.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+
+[lints]
+workspace = true

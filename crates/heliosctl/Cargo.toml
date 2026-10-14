@@ -1,0 +1,20 @@
+[package]
+name = "heliosctl"
+description = "Command-line client for Helios: sensor and platform-profile status"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+helios-core.workspace = true
+helios-sys.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+helios-core = { workspace = true, features = ["fake"] }
+serde_json.workspace = true
+
+[lints]
+workspace = true
