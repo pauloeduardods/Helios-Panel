@@ -1,6 +1,6 @@
 # Keyboard and logo lighting: research and plan
 
-> **Status: plan, partly approved** (see [the decisions](#decisions-for-approval)).
+> **Status: plan, approved on 2026-10-14** (see [the decisions](#decisions-for-approval)).
 > Nothing in this document has been implemented, and nothing has written to
 > the lighting hardware yet. Every fact below comes from reading files: the
 > firmware's ACPI tables, and the source of two community drivers.
@@ -259,13 +259,14 @@ The worst realistic outcome is a wrong keyboard colour until the next write.
    rather than using predator-sense/Linuwu-Sense or waiting for upstream.
    **Approved.**
 2. **Secure Boot**: accept the one-time MOK enrolment for a DKMS-signed
-   module. *Pending.*
+   module. **Approved.**
 3. **Scope of the first version**: the keyboard only (effects 0–5 and the 4
    static zones). `LB`/logo comes later, after it is identified.
    **Approved.**
 4. **The `LB` question**: answered (the lid logo is RGB, and there is no
    light strip). REA on PredatorSense (step 2) is **skipped** for now; the
    supervised write settles it.
-5. **D-Bus API and polkit action** as described above. *Pending.*
+5. **D-Bus API and polkit action** as described above, including re-applying the
+   last state at start and after resume. **Approved.**
 6. **First hardware write**: only through the written test protocol, with
    you present. **Approved.**
