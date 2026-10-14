@@ -25,17 +25,24 @@ jobs:
         with:
           node-version: 22
 
+      - name: Install system packages
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libglib2.0-bin dbus-daemon
+
       - name: npm test
         run: npm test
 
       - name: npm run check
         run: npm run check
 
-      - name: Validate GSettings schema
+      - name: Validate GSettings schema and data files
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq libglib2.0-bin
           glib-compile-schemas --strict --dry-run extension/schemas
+          for f in data/*.conf data/*.policy; do
+            python3 -c 'import sys, xml.dom.minidom as m; m.parse(sys.argv[1])' "$f"
+          done
+          systemd-analyze security --offline=true data/heliosd.service | tail -1
 
       # Rust workspace (helios-core, heliosd, heliosctl): these steps start
       # running as soon as a Cargo.toml lands at the repository root.
