@@ -95,9 +95,22 @@ busctl --system call io.github.pauloeduardods.Helios1 /io/github/pauloeduardods/
 ```bash
 heliosctl status          # human-readable
 heliosctl status --json   # machine-readable
+heliosctl doctor          # check the setup and suggest fixes
 ```
 
 `heliosctl` reads the sensors directly and works without heliosd or root. An NVIDIA GPU that is asleep is reported as `off` and never woken.
+
+`heliosctl doctor` checks that the laptop is an Acer Predator or Nitro, that `acer_wmi` is loaded with `predator_v4=1` (and where that is set), that no modprobe.d file or kernel parameter blocks it, that the platform profile exists, and that heliosd is installed and running. It only reads: when something is wrong it **prints** the commands to fix it, for you to run. It exits with 1 when something needs attention.
+
+```
+[ ok ] machine          Acer Predator PHN16-72 (Predator Helios Neo 16), BIOS V1.20
+[ ok ] acer_wmi         acer_wmi is loaded with predator_v4=1
+[ ok ] predator_v4      set at boot by /etc/modprobe.d/acer-predator.conf:1
+[ ok ] platform_profile balanced (acer-wmi); choices: low-power, quiet, balanced, balanced-performance, performance
+[ ok ] heliosd          installed and running (pid 1911038)
+
+Nothing to fix.
+```
 
 ## Development
 
