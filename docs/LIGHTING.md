@@ -264,7 +264,8 @@ The worst realistic outcome is a wrong keyboard colour until the next write.
    static zones). `LB`/logo comes later, after it is identified.
    **Approved.**
 4. **The `LB` question**: answered (the lid logo is RGB, and there is no
-   light strip). Whether to run REA on PredatorSense (step 2) is *pending*.
+   light strip). REA on PredatorSense (step 2) is **skipped** for now; the
+   supervised write settles it.
 5. **D-Bus API and polkit action** as described above. *Pending.*
 6. **First hardware write**: only through the written test protocol, with
    you present. **Approved.**
