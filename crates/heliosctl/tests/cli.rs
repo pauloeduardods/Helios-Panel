@@ -40,7 +40,10 @@ impl Fixture {
         let smi = base.join("nvidia-smi");
         fs::write(
             &smi,
-            format!("#!/bin/sh\necho run >> '{}'\necho 47\n", smi_log.display()),
+            format!(
+                "#!/bin/sh\necho run >> '{}'\necho '47, 35.2'\n",
+                smi_log.display()
+            ),
         )
         .unwrap();
         fs::set_permissions(&smi, fs::Permissions::from_mode(0o755)).unwrap();

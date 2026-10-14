@@ -32,6 +32,10 @@ const GPU_STATUS: &str = "sys/bus/pci/devices/0000:01:00.0/power/runtime_status"
 const CLASS_PROFILE: &str = "sys/class/platform-profile/platform-profile-0/profile";
 const LEGACY_PROFILE: &str = "sys/firmware/acpi/platform_profile";
 const CPU_TEMP: &str = "sys/class/hwmon/hwmon5/temp1_input";
+const AC_ONLINE: &str = "sys/class/power_supply/ACAD/online";
+const BAT: &str = "sys/class/power_supply/BAT1";
+
+type Battery = (String, String, f64, f64, f64, i32, i32);
 
 const BUS_CONFIG: &str = r#"<!DOCTYPE busconfig PUBLIC "-//freedesktop//DTD D-Bus Bus Configuration 1.0//EN"
  "http://www.freedesktop.org/standards/dbus/1.0/busconfig.dtd">
@@ -149,7 +153,10 @@ impl Harness {
         let smi = base.join("nvidia-smi");
         fs::write(
             &smi,
-            format!("#!/bin/sh\necho run >> '{}'\necho 47\n", smi_log.display()),
+            format!(
+                "#!/bin/sh\necho run >> '{}'\necho '47, 35.2'\n",
+                smi_log.display()
+            ),
         )
         .unwrap();
         fs::set_permissions(&smi, fs::Permissions::from_mode(0o755)).unwrap();
@@ -336,6 +343,15 @@ fn properties_reflect_the_sysfs_tree() {
         assert_eq!(fans, [("Fan 1".into(), 2350), ("Fan 2".into(), 2600)]);
         let temps: Vec<(String, String, String, f64)> = h.get(SENSORS, "Temperatures").await;
         assert_eq!(temps.len(), 4);
+        assert_eq!(
+            h.get::<(bool, f64)>(SENSORS, "GpuPower").await,
+            (false, 0.0)
+        );
+        assert_eq!(h.get::<String>(SENSORS, "PowerSource").await, "ac");
+        assert_eq!(
+            h.get::<Battery>(SENSORS, "Battery").await,
+            ("BAT1".into(), "not-charging".into(), 80.0, 0.0, 92.0, 0, -1)
+        );
 
         assert!(h.get::<bool>(PROFILE, "Available").await);
         assert_eq!(h.get::<String>(PROFILE, "Active").await, "balanced");
@@ -352,7 +368,7 @@ fn properties_reflect_the_sysfs_tree() {
             ]
         );
 
-        assert_eq!(h.get::<u32>(DAEMON, "ApiVersion").await, 1);
+        assert_eq!(h.get::<u32>(DAEMON, "ApiVersion").await, 2);
         assert_eq!(
             h.get::<String>(DAEMON, "Version").await,
             env!("CARGO_PKG_VERSION")
@@ -451,6 +467,10 @@ fn suspended_gpu_is_never_queried_and_an_awake_one_is() {
             .wait_for(SENSORS, "Gpu", |g: &(String, String, bool, f64)| g.2)
             .await;
         assert_eq!(gpu, ("nvidia-smi".into(), "on".into(), true, 47.0));
+        assert_eq!(
+            h.get::<(bool, f64)>(SENSORS, "GpuPower").await,
+            (true, 35.2)
+        );
         Timer::after(Duration::from_millis(500)).await;
         assert_eq!(h.smi_runs(), 1, "rate-limited to one query per 10 s");
 
@@ -508,6 +528,32 @@ fn sensor_changes_emit_properties_changed() {
 
         let cpu: (String, bool, f64) = h.get(SENSORS, "Cpu").await;
         assert_eq!(cpu.2, 75.0);
+    });
+}
+
+#[test]
+fn unplugging_publishes_the_battery_draw() {
+    async_io::block_on(async {
+        let h = Harness::start(Polkit::Allow).await;
+        h.write(&format!("{BAT}/current_now"), "1500000\n");
+        h.write(&format!("{BAT}/status"), "Discharging\n");
+        h.write(AC_ONLINE, "0\n");
+        let battery = h
+            .wait_for(SENSORS, "Battery", |b: &Battery| b.1 == "discharging")
+            .await;
+        assert_eq!(
+            battery,
+            (
+                "BAT1".into(),
+                "discharging".into(),
+                80.0,
+                24.5,
+                92.0,
+                0,
+                172
+            )
+        );
+        assert_eq!(h.get::<String>(SENSORS, "PowerSource").await, "battery");
     });
 }
 

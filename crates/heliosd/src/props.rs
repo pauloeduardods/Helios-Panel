@@ -3,6 +3,7 @@
 //! snapshots. Pure: no bus access, unit-tested below.
 
 use helios_core::nvidia::GpuState;
+use helios_core::power::{BatteryState, PowerSource};
 use helios_core::status::Status;
 use zbus::zvariant::Value;
 
@@ -14,6 +15,11 @@ pub type Gpu = (String, String, bool, f64);
 pub type Fan = (String, i32);
 /// (id, chip, label, °C); unreadable sensors are left out
 pub type Temperature = (String, String, String, f64);
+/// (valid, W)
+pub type GpuPower = (bool, f64);
+/// (name, state, %, W, health %, cycles, minutes left); name "" = no battery,
+/// -1 = unknown
+pub type Battery = (String, String, f64, f64, f64, i32, i32);
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct SensorsProps {
@@ -21,6 +27,9 @@ pub struct SensorsProps {
     pub gpu: Gpu,
     pub fans: Vec<Fan>,
     pub temperatures: Vec<Temperature>,
+    pub gpu_power: GpuPower,
+    pub power_source: String,
+    pub battery: Battery,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -33,6 +42,51 @@ pub struct ProfileProps {
 
 fn reading(celsius: Option<f64>) -> (bool, f64) {
     (celsius.is_some(), celsius.unwrap_or(0.0))
+}
+
+pub fn power_source_name(source: PowerSource) -> &'static str {
+    match source {
+        PowerSource::Ac => "ac",
+        PowerSource::Battery => "battery",
+        PowerSource::Unknown => "unknown",
+    }
+}
+
+pub fn battery_state_name(state: BatteryState) -> &'static str {
+    match state {
+        BatteryState::Charging => "charging",
+        BatteryState::Discharging => "discharging",
+        BatteryState::Full => "full",
+        BatteryState::NotCharging => "not-charging",
+        BatteryState::Unknown => "unknown",
+    }
+}
+
+fn int_or_unknown(value: Option<i64>) -> i32 {
+    value.and_then(|v| i32::try_from(v).ok()).unwrap_or(-1)
+}
+
+fn battery(s: &Status) -> Battery {
+    let Some(b) = &s.power.battery else {
+        return (
+            String::new(),
+            "unknown".to_owned(),
+            -1.0,
+            -1.0,
+            -1.0,
+            -1,
+            -1,
+        );
+    };
+    (
+        b.name.clone(),
+        battery_state_name(b.state).to_owned(),
+        b.percent.unwrap_or(-1.0),
+        b.watts.unwrap_or(-1.0),
+        b.health_percent.unwrap_or(-1.0),
+        int_or_unknown(b.cycles),
+        int_or_unknown(b.minutes_left),
+    )
 }
 
 pub fn gpu_state_name(state: GpuState) -> &'static str {
@@ -68,6 +122,9 @@ impl From<&Status> for SensorsProps {
                 .iter()
                 .filter_map(|t| Some((t.id.clone(), t.chip.clone(), t.label.clone(), t.celsius?)))
                 .collect(),
+            gpu_power: reading(s.gpu.watts),
+            power_source: power_source_name(s.power.source).to_owned(),
+            battery: battery(s),
         }
     }
 }
@@ -99,6 +156,15 @@ pub fn sensors_changes(old: &SensorsProps, new: &SensorsProps) -> Changes {
     }
     if old.temperatures != new.temperatures {
         out.push(("Temperatures", Value::from(new.temperatures.clone())));
+    }
+    if old.gpu_power != new.gpu_power {
+        out.push(("GpuPower", Value::from(new.gpu_power)));
+    }
+    if old.power_source != new.power_source {
+        out.push(("PowerSource", Value::from(new.power_source.clone())));
+    }
+    if old.battery != new.battery {
+        out.push(("Battery", Value::from(new.battery.clone())));
     }
     out
 }
@@ -145,6 +211,12 @@ mod tests {
             [("Fan 1".into(), 2350), ("Fan 2".into(), 2600)]
         );
         assert_eq!(sensors.temperatures.len(), 4);
+        assert_eq!(sensors.gpu_power, (false, 0.0));
+        assert_eq!(sensors.power_source, "ac");
+        assert_eq!(
+            sensors.battery,
+            ("BAT1".into(), "not-charging".into(), 80.0, 0.0, 92.0, 0, -1)
+        );
 
         let profile = ProfileProps::from(&s);
         assert!(profile.available);
@@ -192,6 +264,44 @@ mod tests {
         assert_eq!(
             names(profile_changes(&(&before).into(), &(&after).into())),
             ["Active"]
+        );
+    }
+
+    #[test]
+    fn no_battery_uses_sentinels() {
+        let fs = FakeFs::new(helios_core::fake::AMD_DESKTOP);
+        let sensors = SensorsProps::from(&status(&fs));
+        assert_eq!(sensors.power_source, "unknown");
+        assert_eq!(
+            sensors.battery,
+            (String::new(), "unknown".into(), -1.0, -1.0, -1.0, -1, -1)
+        );
+    }
+
+    #[test]
+    fn unplugging_changes_source_and_battery() {
+        let fs = FakeFs::new(PHN16_72);
+        let before = status(&fs);
+        fs.set("/sys/class/power_supply/ACAD/online", "0");
+        fs.set("/sys/class/power_supply/BAT1/status", "Discharging");
+        fs.set("/sys/class/power_supply/BAT1/current_now", "1500000");
+        let after = status(&fs);
+        let names: Vec<_> = sensors_changes(&(&before).into(), &(&after).into())
+            .into_iter()
+            .map(|(n, _)| n)
+            .collect();
+        assert_eq!(names, ["PowerSource", "Battery"]);
+        assert_eq!(
+            SensorsProps::from(&after).battery,
+            (
+                "BAT1".into(),
+                "discharging".into(),
+                80.0,
+                24.5,
+                92.0,
+                0,
+                172
+            )
         );
     }
 

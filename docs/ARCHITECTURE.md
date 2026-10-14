@@ -64,6 +64,7 @@ crates/
 │   ├── src/fake.rs          FakeFs/FakeGpu/FakeClock + PHN16-72 and AMD fixtures ("fake" feature)
 │   ├── src/hwmon.rs         scan, CPU/AMD GPU/fan resolution, sensor ids
 │   ├── src/nvidia.rs        PCI lookup, runtime-PM gate, query interval
+│   ├── src/power.rs         power source, laptop battery, averaged draw
 │   ├── src/profile.rs       platform profile state, validation, write path
 │   ├── src/status.rs        Status struct (serde) shared by CLI JSON and daemon
 │   └── src/doctor.rs        read-only setup checks over the injected fs
@@ -92,9 +93,9 @@ pub trait SysFs {
     fn write(&self, path: &str, value: &str) -> io::Result<()>; // in place, no temp+rename
 }
 
-/// Runs `nvidia-smi --query-gpu=temperature.gpu --format=csv,noheader,nounits`.
+/// Runs `nvidia-smi --query-gpu=temperature.gpu,power.draw --format=csv,noheader,nounits`.
 pub trait GpuQuery {
-    fn query_temperature(&self) -> Option<f64>;
+    fn query(&self) -> Option<String>; // stdout; None if it failed or timed out
 }
 
 pub trait Clock {
@@ -146,8 +147,11 @@ heliosctl doctor [--json]   diagnosis, read-only, prints suggested commands
 {
   "schema": 1,
   "cpu": {"sensor": "hwmon:coretemp/Package id 0", "celsius": 61.0},
-  "gpu": {"source": "nvidia-smi", "state": "off", "celsius": null},
+  "gpu": {"source": "nvidia-smi", "state": "off", "celsius": null, "watts": null},
   "fans": [{"label": "Fan 1", "rpm": 2350}, {"label": "Fan 2", "rpm": 2600}],
+  "power": {"source": "ac",
+            "battery": {"name": "BAT1", "state": "not-charging", "percent": 80.0, "watts": 0.0,
+                        "health_percent": 92.0, "cycles": 0, "minutes_left": null}},
   "profile": {"available": true, "active": "balanced", "driver": "acer-wmi",
               "choices": ["low-power", "quiet", "balanced", "balanced-performance", "performance"]},
   "temperatures": [{"id": "hwmon:coretemp/Package id 0", "chip": "coretemp",
@@ -156,9 +160,12 @@ heliosctl doctor [--json]   diagnosis, read-only, prints suggested commands
 ```
 
 `gpu.state` is `on`, `off` (asleep, not queried) or `none` (no GPU source).
+`power.source` is `ac`, `battery` or `unknown`; `power.battery` is `null`
+without a laptop battery. `battery.watts` is the power flowing in or out of the
+battery (always positive), and `minutes_left` is only set while discharging.
 heliosctl follows the same NVIDIA rule: no query unless the GPU is active.
 
-## D-Bus API (version 1)
+## D-Bus API (version 2)
 
 - **Bus:** system bus.
 - **Well-known name:** `io.github.pauloeduardods.Helios1`. It is a reverse-DNS
@@ -173,7 +180,7 @@ All properties are read-only and emit `org.freedesktop.DBus.Properties.Propertie
 | Member | Type | Meaning |
 |---|---|---|
 | `Version` | `s` | heliosd version, e.g. `0.2.0` |
-| `ApiVersion` | `u` | `1`; raised for compatible additions |
+| `ApiVersion` | `u` | `2`; raised for compatible additions (2 added `GpuPower`, `PowerSource`, `Battery`) |
 
 ### `io.github.pauloeduardods.Helios1.Sensors`
 
@@ -183,6 +190,9 @@ All properties are read-only and emit `org.freedesktop.DBus.Properties.Propertie
 | `Gpu` | `(ssbd)` | (source id, state `on`/`off`/`none`, valid, °C) |
 | `Fans` | `a(si)` | (label, rpm; `-1` = unreadable) |
 | `Temperatures` | `a(sssd)` | every readable hwmon temperature: (id, chip, label, °C), for clients that let the user pick a sensor; unreadable sensors are left out |
+| `GpuPower` | `(bd)` | (valid, W): NVIDIA board draw, from the same rate-limited `nvidia-smi` query as the temperature |
+| `PowerSource` | `s` | `ac`, `battery` or `unknown` (no system `Mains` supply and the battery is not discharging) |
+| `Battery` | `(ssdddii)` | (name, state `charging`/`discharging`/`full`/`not-charging`/`unknown`, %, W, health %, cycles, minutes left); name `""` = no battery, `-1` = unknown |
 
 The `valid` flag replaces NaN sentinels, so every frontend, including JSON-based
 ones, gets an explicit "no value".

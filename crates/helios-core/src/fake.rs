@@ -48,6 +48,22 @@ pub const PHN16_72: &[(&str, &str)] = &[
         "/sys/class/platform-profile/platform-profile-0/choices",
         "low-power quiet balanced balanced-performance performance",
     ),
+    // On AC with the battery held at 80% (charge_* naming, no power_now).
+    ("/sys/class/power_supply/ACAD/type", "Mains"),
+    ("/sys/class/power_supply/ACAD/online", "1"),
+    ("/sys/class/power_supply/BAT1/type", "Battery"),
+    ("/sys/class/power_supply/BAT1/status", "Not charging"),
+    ("/sys/class/power_supply/BAT1/capacity", "80"),
+    ("/sys/class/power_supply/BAT1/voltage_now", "16312000"),
+    ("/sys/class/power_supply/BAT1/current_now", "0"),
+    ("/sys/class/power_supply/BAT1/charge_now", "4305000"),
+    ("/sys/class/power_supply/BAT1/charge_full", "5413000"),
+    ("/sys/class/power_supply/BAT1/charge_full_design", "5884000"),
+    ("/sys/class/power_supply/BAT1/cycle_count", "0"),
+    // A wireless mouse: a battery, but not the laptop's.
+    ("/sys/class/power_supply/hidpp_battery_1/type", "Battery"),
+    ("/sys/class/power_supply/hidpp_battery_1/scope", "Device"),
+    ("/sys/class/power_supply/hidpp_battery_1/capacity", "95"),
 ];
 
 /// The rest of a healthy PHN16-72 for `doctor`: DMI, acer_wmi loaded with
@@ -215,7 +231,7 @@ impl FakeGpu {
 }
 
 impl GpuQuery for FakeGpu {
-    fn query_temperature(&self) -> Option<String> {
+    fn query(&self) -> Option<String> {
         self.calls.set(self.calls.get() + 1);
         self.output.borrow().clone()
     }

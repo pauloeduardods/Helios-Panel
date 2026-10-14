@@ -3,8 +3,9 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
-    Level, daemonMessage, formatRpm, formatTemp, pickCpu, pickGpu, profileColor,
-    profileFromDbus, profileLabel, sanitizeThresholds, sensorsFromDbus, setProfileError, tempLevel,
+    Level, batteryStateLabel, daemonMessage, formatDuration, formatRpm, formatTemp, formatWatts,
+    pickCpu, pickGpu, powerFromDbus, powerPanelText, profileColor, profileFromDbus, profileLabel,
+    sanitizeThresholds, sensorsFromDbus, setProfileError, tempLevel,
 } from '../extension/lib/model.js';
 
 // What heliosd publishes on a PHN16-72 with the NVIDIA GPU asleep.
@@ -47,6 +48,60 @@ test('profile names and colors', () => {
     assert.equal(profileColor('balanced'), null);
     assert.equal(profileColor('performance'), '#f66151');
     assert.equal(profileColor('unknown'), null);
+});
+
+test('power formatting', () => {
+    assert.equal(formatWatts(24.46), '24.5 W');
+    assert.equal(formatWatts(0), '0.0 W');
+    assert.equal(formatWatts(112.4), '112 W');
+    assert.equal(formatWatts(null), '--');
+    assert.equal(formatDuration(172), '2 h 52 min');
+    assert.equal(formatDuration(60), '1 h 00 min');
+    assert.equal(formatDuration(45), '45 min');
+    assert.equal(formatDuration(null), '--');
+    assert.equal(formatDuration(-1), '--');
+    assert.equal(batteryStateLabel('not-charging'), 'Not charging');
+    assert.equal(batteryStateLabel('weird'), 'Unknown');
+});
+
+test('heliosd power becomes a plain object', () => {
+    // A PHN16-72 on AC with the battery held at 80%.
+    const ac = powerFromDbus({
+        GpuPower: [true, 1.9],
+        PowerSource: 'ac',
+        Battery: ['BAT1', 'not-charging', 80, 0, 92, 0, -1],
+    });
+    assert.deepEqual(ac, {
+        source: 'ac',
+        gpuWatts: 1.9,
+        battery: {
+            name: 'BAT1', state: 'not-charging', percent: 80, watts: 0,
+            health: 92, cycles: null, minutesLeft: null,
+        },
+    });
+    assert.equal(powerPanelText(ac), 'AC');
+
+    const onBattery = powerFromDbus({
+        GpuPower: [false, 0],
+        PowerSource: 'battery',
+        Battery: ['BAT1', 'discharging', 80, 24.5, 92, 312, 172],
+    });
+    assert.equal(onBattery.gpuWatts, null);
+    assert.equal(onBattery.battery.cycles, 312);
+    assert.equal(onBattery.battery.minutesLeft, 172);
+    assert.equal(powerPanelText(onBattery), '24.5 W');
+
+    const unknownDraw = powerFromDbus({PowerSource: 'battery', Battery: ['BAT0', 'discharging', -1, -1, -1, -1, -1]});
+    assert.equal(powerPanelText(unknownDraw), '--');
+    assert.equal(unknownDraw.battery.percent, null);
+});
+
+test('an older heliosd without power properties shows nothing', () => {
+    const none = powerFromDbus({});
+    assert.deepEqual(none, {source: 'unknown', gpuWatts: null, battery: null});
+    assert.equal(powerPanelText(none), null);
+    assert.deepEqual(powerFromDbus(), none);
+    assert.equal(powerFromDbus({Battery: ['', 'unknown', -1, -1, -1, -1, -1]}).battery, null);
 });
 
 test('heliosd sensors become plain objects', () => {

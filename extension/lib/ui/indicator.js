@@ -15,8 +15,8 @@ import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 
 import {HeliosClient} from '../client.js';
 import {
-    Level, daemonMessage, formatRpm, formatTemp, pickCpu, pickGpu,
-    profileColor, profileLabel, setProfileError, tempLevel,
+    Level, batteryStateLabel, daemonMessage, formatDuration, formatRpm, formatTemp, formatWatts,
+    pickCpu, pickGpu, powerPanelText, profileColor, profileLabel, setProfileError, tempLevel,
 } from '../model.js';
 
 function makeSegment(iconPath) {
@@ -79,9 +79,10 @@ class HeliosIndicator extends PanelMenu.Button {
             cpu: makeSegment(icon('cpu')),
             gpu: makeSegment(icon('gpu')),
             fan: makeSegment(icon('fan')),
+            power: makeSegment(icon('power')),
             profile: makeSegment(icon('profile')),
         };
-        for (const key of ['cpu', 'gpu', 'fan', 'profile'])
+        for (const key of ['cpu', 'gpu', 'fan', 'power', 'profile'])
             this._box.add_child(this._seg[key].box);
 
         // Shown instead of the readings while heliosd is unavailable.
@@ -111,6 +112,20 @@ class HeliosIndicator extends PanelMenu.Button {
         this._readingsSection.addMenuItem(this._fanSection);
         this.menu.addMenuItem(this._readingsSection);
 
+        this._powerSection = new PopupMenu.PopupMenuSection();
+        this._powerSection.addMenuItem(new PopupMenu.PopupSeparatorMenuItem('Power'));
+        this._powerRows = {
+            source: makeInfoRow('Source'),
+            battery: makeInfoRow('Battery'),
+            draw: makeInfoRow('Draw'),
+            timeLeft: makeInfoRow('Time left'),
+            gpu: makeInfoRow('GPU draw'),
+            health: makeInfoRow('Battery health'),
+        };
+        for (const row of Object.values(this._powerRows))
+            this._powerSection.addMenuItem(row.item);
+        this.menu.addMenuItem(this._powerSection);
+
         this._profileHeader = new PopupMenu.PopupSeparatorMenuItem('Power Profile');
         this.menu.addMenuItem(this._profileHeader);
         this._profileSection = new PopupMenu.PopupMenuSection();
@@ -133,6 +148,7 @@ class HeliosIndicator extends PanelMenu.Button {
         this._statusSeg.icon.visible = icons;
         this._statusSection.actor.visible = message !== null;
         this._readingsSection.actor.visible = message === null;
+        this._powerSection.actor.visible = message === null;
         if (message) {
             for (const seg of Object.values(this._seg))
                 seg.box.visible = false;
@@ -144,10 +160,11 @@ class HeliosIndicator extends PanelMenu.Button {
             return;
         }
 
-        const {sensors, profile} = snap;
+        const {sensors, power, profile} = snap;
         this._renderCpu(pickCpu(sensors, this._settings.get_string('cpu-sensor')));
         this._renderGpu(pickGpu(sensors, this._settings.get_string('gpu-sensor')));
         this._renderFans(sensors.fans);
+        this._renderPower(power);
         this._renderProfile(profile);
     }
 
@@ -228,6 +245,35 @@ class HeliosIndicator extends PanelMenu.Button {
         fans.forEach((f, i) => {
             this._fanRows[i].value.text = f.rpm === null ? '--' : `${f.rpm} RPM`;
         });
+    }
+
+    _renderPower(power) {
+        const seg = this._seg.power;
+        const text = powerPanelText(power);
+        seg.icon.visible = this._settings.get_boolean('show-icons');
+        seg.box.visible = this._settings.get_boolean('show-power') && text !== null;
+        seg.label.text = text ?? '';
+        // Dimmed on AC: the draw is only known on battery.
+        seg.box.opacity = power.source === 'battery' ? 255 : 128;
+
+        const battery = power.battery;
+        const discharging = battery?.state === 'discharging';
+        const rows = this._powerRows;
+        const show = (row, value) => {
+            row.item.visible = value !== null;
+            row.value.text = value ?? '';
+        };
+        show(rows.source, {ac: 'AC', battery: 'Battery'}[power.source] ?? null);
+        show(rows.battery, battery
+            ? `${battery.percent === null ? '--' : `${Math.round(battery.percent)}%`} · ${batteryStateLabel(battery.state)}`
+            : null);
+        show(rows.draw, discharging ? formatWatts(battery.watts) : null);
+        show(rows.timeLeft, discharging && battery.minutesLeft !== null ? formatDuration(battery.minutesLeft) : null);
+        show(rows.gpu, power.gpuWatts === null ? null : formatWatts(power.gpuWatts));
+        show(rows.health, battery && battery.health !== null
+            ? `${Math.round(battery.health)}%${battery.cycles ? ` · ${battery.cycles} cycles` : ''}`
+            : null);
+        this._powerSection.actor.visible = Object.values(rows).some(r => r.item.visible);
     }
 
     _renderProfile(state) {

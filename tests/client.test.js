@@ -19,6 +19,9 @@ beforeEach(() => {
                 Gpu: ['nvidia-smi', 'off', false, 0],
                 Fans: [['Fan 1', 2350]],
                 Temperatures: [],
+                GpuPower: [false, 0],
+                PowerSource: 'ac',
+                Battery: ['BAT1', 'not-charging', 80, 0, 92, 0, -1],
             },
             [`${IFACE}.Profile`]: {
                 Available: true, Active: 'balanced', Choices: ['quiet', 'balanced'], Driver: 'acer-wmi',
@@ -51,6 +54,7 @@ test('starts connecting, with nothing to show', () => {
     const snap = client.snapshot();
     assert.equal(snap.state, 'connecting');
     assert.equal(snap.sensors.cpu.celsius, null);
+    assert.equal(snap.power.battery, null);
     assert.equal(snap.profile.available, false);
 });
 
@@ -79,6 +83,8 @@ test('running: properties come from the proxies', async () => {
     assert.equal(snap.version, '0.2.0');
     assert.deepEqual(snap.sensors.cpu, {sensor: 'hwmon:coretemp/Package id 0', celsius: 61});
     assert.equal(snap.sensors.gpu.state, 'off');
+    assert.equal(snap.power.source, 'ac');
+    assert.equal(snap.power.battery.health, 92);
     assert.equal(snap.profile.current, 'balanced');
 });
 

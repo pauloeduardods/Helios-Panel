@@ -7,6 +7,7 @@ use std::process::ExitCode;
 use helios_core::GpuQuery;
 use helios_core::doctor::{self, Level, Report};
 use helios_core::nvidia::GpuState;
+use helios_core::power::{BatteryState, PowerSource, PowerStatus};
 use helios_core::status::{Monitor, Status};
 use helios_sys::{NvidiaSmi, RootedFs, SystemClock};
 
@@ -14,7 +15,7 @@ const USAGE: &str = "\
 Usage: heliosctl <command>
 
 Commands:
-  status [--json]   Show temperatures, fans and the platform profile
+  status [--json]   Show temperatures, fans, power, battery and the profile
   doctor [--json]   Check what Helios needs and suggest fixes (changes nothing)
   help              Show this help
   version           Show the version
@@ -81,6 +82,65 @@ fn celsius(value: Option<f64>) -> String {
     value.map_or_else(|| "--".to_owned(), |c| format!("{c:.1} °C"))
 }
 
+/// 172 -> "2 h 52 min", 45 -> "45 min".
+fn duration(minutes: i64) -> String {
+    match (minutes / 60, minutes % 60) {
+        (0, m) => format!("{m} min"),
+        (h, m) => format!("{h} h {m:02} min"),
+    }
+}
+
+fn battery_state(state: BatteryState) -> &'static str {
+    match state {
+        BatteryState::Charging => "charging",
+        BatteryState::Discharging => "discharging",
+        BatteryState::Full => "full",
+        BatteryState::NotCharging => "not charging",
+        BatteryState::Unknown => "unknown state",
+    }
+}
+
+/// The "Power" and "Battery" lines; none on a machine without either.
+fn render_power(power: &PowerStatus) -> Vec<(&'static str, String)> {
+    let mut lines = Vec::new();
+    let battery = power.battery.as_ref();
+    match power.source {
+        PowerSource::Ac => lines.push(("Power", "AC".to_owned())),
+        PowerSource::Battery => {
+            let mut parts = vec!["battery".to_owned()];
+            if let Some(watts) = battery.and_then(|b| b.watts) {
+                parts.push(format!("{watts:.1} W"));
+            }
+            if let Some(minutes) = battery.and_then(|b| b.minutes_left) {
+                parts.push(format!("about {} left", duration(minutes)));
+            }
+            lines.push(("Power", parts.join(", ")));
+        }
+        PowerSource::Unknown => {}
+    }
+    if let Some(b) = battery {
+        let percent = b
+            .percent
+            .map_or_else(|| "--".to_owned(), |p| format!("{p:.0}%"));
+        let mut details = vec![b.name.clone()];
+        if let Some(health) = b.health_percent {
+            details.push(format!("health {health:.0}%"));
+        }
+        if let Some(cycles) = b.cycles.filter(|c| *c > 0) {
+            details.push(format!("{cycles} cycles"));
+        }
+        lines.push((
+            "Battery",
+            format!(
+                "{percent}, {}  ({})",
+                battery_state(b.state),
+                details.join(", ")
+            ),
+        ));
+    }
+    lines
+}
+
 fn render(status: &Status) -> String {
     let mut out = String::new();
     let mut line = |name: &str, value: String| out.push_str(&format!("{name:<9}{value}\n"));
@@ -93,7 +153,10 @@ fn render(status: &Status) -> String {
 
     let gpu = &status.gpu;
     let gpu_value = match gpu.state {
-        GpuState::On => celsius(gpu.celsius),
+        GpuState::On => match gpu.watts {
+            Some(watts) => format!("{}, {watts:.1} W", celsius(gpu.celsius)),
+            None => celsius(gpu.celsius),
+        },
         GpuState::Off => "off (asleep, not queried)".to_owned(),
         GpuState::None => "no sensor found".to_owned(),
     };
@@ -112,6 +175,10 @@ fn render(status: &Status) -> String {
             })
             .collect();
         line("Fans", fans.join(", "));
+    }
+
+    for (name, value) in render_power(&status.power) {
+        line(name, value);
     }
 
     let profile = &status.profile;
@@ -316,10 +383,38 @@ mod tests {
 CPU      61.0 °C  (hwmon:coretemp/Package id 0)
 GPU      no sensor found
 Fans     Fan 1 2350 RPM, Fan 2 2600 RPM
+Power    AC
+Battery  80%, not charging  (BAT1, health 92%)
 Profile  balanced  (acer-wmi)
 Choices  low-power, quiet, balanced, balanced-performance, performance
 "
         );
+    }
+
+    #[test]
+    fn human_output_on_battery() {
+        let fs = FakeFs::new(PHN16_72);
+        fs.set("/sys/class/power_supply/ACAD/online", "0");
+        fs.set("/sys/class/power_supply/BAT1/status", "Discharging");
+        fs.set("/sys/class/power_supply/BAT1/current_now", "1500000");
+        fs.set("/sys/class/power_supply/BAT1/cycle_count", "312");
+        let text = render(&Monitor::new(&fs).poll(&fs, None, &FakeClock::default()));
+        assert!(
+            text.contains("Power    battery, 24.5 W, about 2 h 52 min left\n"),
+            "{text}"
+        );
+        assert!(
+            text.contains("Battery  80%, discharging  (BAT1, health 92%, 312 cycles)\n"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn durations() {
+        assert_eq!(duration(172), "2 h 52 min");
+        assert_eq!(duration(60), "1 h 00 min");
+        assert_eq!(duration(45), "45 min");
+        assert_eq!(duration(0), "0 min");
     }
 
     #[test]
@@ -331,6 +426,8 @@ Choices  low-power, quiet, balanced, balanced-performance, performance
             "{text}"
         );
         assert!(!text.contains("Fans"));
+        assert!(!text.contains("Power"));
+        assert!(!text.contains("Battery"));
         assert!(text.contains("Profile  unavailable"));
     }
 }

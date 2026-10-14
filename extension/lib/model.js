@@ -100,6 +100,76 @@ export function sensorsFromDbus({Cpu, Gpu, Fans, Temperatures} = {}) {
     };
 }
 
+/** -1 (heliosd's "unknown") and garbage become null. */
+function known(value) {
+    return Number.isFinite(value) && value >= 0 ? value : null;
+}
+
+/**
+ * Power source, battery and GPU draw (API v2). An older heliosd has none of
+ * these properties: the source is 'unknown' and there is no battery.
+ */
+export function powerFromDbus({GpuPower, PowerSource, Battery} = {}) {
+    const [gpuValid = false, gpuWatts = 0] = GpuPower ?? [];
+    const [name = '', state = 'unknown', percent, watts, health, cycles, minutesLeft] = Battery ?? [];
+    return {
+        source: PowerSource || 'unknown',
+        gpuWatts: gpuValid ? known(gpuWatts) : null,
+        battery: name ? {
+            name,
+            state,
+            percent: known(percent),
+            watts: known(watts),
+            health: known(health),
+            // Many firmwares report 0 forever, which says nothing.
+            cycles: cycles > 0 ? cycles : null,
+            minutesLeft: known(minutesLeft),
+        } : null,
+    };
+}
+
+/** 24.46 -> "24.5 W", 112.4 -> "112 W". */
+export function formatWatts(watts) {
+    if (watts === null || watts === undefined || !Number.isFinite(watts))
+        return '--';
+    return watts < 100 ? `${watts.toFixed(1)} W` : `${Math.round(watts)} W`;
+}
+
+/** 172 -> "2 h 52 min", 45 -> "45 min". */
+export function formatDuration(minutes) {
+    if (minutes === null || minutes === undefined || !Number.isFinite(minutes) || minutes < 0)
+        return '--';
+    const h = Math.floor(minutes / 60);
+    const m = Math.round(minutes % 60);
+    return h === 0 ? `${m} min` : `${h} h ${String(m).padStart(2, '0')} min`;
+}
+
+const BATTERY_STATES = Object.freeze({
+    'charging': 'Charging',
+    'discharging': 'Discharging',
+    'full': 'Full',
+    'not-charging': 'Not charging',
+});
+
+export function batteryStateLabel(state) {
+    return BATTERY_STATES[state] ?? 'Unknown';
+}
+
+/**
+ * Panel text: the draw on battery, "AC" on mains, null when the machine
+ * reports no power source (nothing to show).
+ */
+export function powerPanelText(power) {
+    switch (power.source) {
+    case 'battery':
+        return formatWatts(power.battery?.watts ?? null);
+    case 'ac':
+        return 'AC';
+    default:
+        return null;
+    }
+}
+
 export function profileFromDbus({Available, Active, Choices, Driver} = {}) {
     return {
         available: Available === true,

@@ -75,7 +75,7 @@ pub struct NvidiaSmi {
 impl NvidiaSmi {
     pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(4);
     const ARGS: [&'static str; 2] = [
-        "--query-gpu=temperature.gpu",
+        "--query-gpu=temperature.gpu,power.draw",
         "--format=csv,noheader,nounits",
     ];
 
@@ -124,7 +124,7 @@ fn is_executable(path: &Path) -> bool {
 }
 
 impl GpuQuery for NvidiaSmi {
-    fn query_temperature(&self) -> Option<String> {
+    fn query(&self) -> Option<String> {
         let mut child = self.spawn()?;
         let deadline = Instant::now() + self.timeout;
         loop {
@@ -228,7 +228,7 @@ mod tests {
     fn nvidia_smi_output_is_returned() {
         let dir = temp_dir();
         let smi = NvidiaSmi::new(script(&dir, "echo 47"), NvidiaSmi::DEFAULT_TIMEOUT);
-        assert_eq!(smi.query_temperature().as_deref(), Some("47\n"));
+        assert_eq!(smi.query().as_deref(), Some("47\n"));
     }
 
     #[test]
@@ -236,8 +236,8 @@ mod tests {
         let dir = temp_dir();
         let smi = NvidiaSmi::new(script(&dir, "echo \"$@\""), NvidiaSmi::DEFAULT_TIMEOUT);
         assert_eq!(
-            smi.query_temperature().as_deref(),
-            Some("--query-gpu=temperature.gpu --format=csv,noheader,nounits\n")
+            smi.query().as_deref(),
+            Some("--query-gpu=temperature.gpu,power.draw --format=csv,noheader,nounits\n")
         );
     }
 
@@ -253,7 +253,7 @@ mod tests {
             drop(writer);
         });
         let smi = NvidiaSmi::new(&path, NvidiaSmi::DEFAULT_TIMEOUT);
-        assert_eq!(smi.query_temperature().as_deref(), Some("47\n"));
+        assert_eq!(smi.query().as_deref(), Some("47\n"));
         release.join().unwrap();
     }
 
@@ -261,18 +261,18 @@ mod tests {
     fn nvidia_smi_failure_and_timeout_give_none() {
         let dir = temp_dir();
         let failing = NvidiaSmi::new(script(&dir, "echo 47; exit 1"), NvidiaSmi::DEFAULT_TIMEOUT);
-        assert_eq!(failing.query_temperature(), None);
+        assert_eq!(failing.query(), None);
 
         let dir = temp_dir();
         let slow = NvidiaSmi::new(script(&dir, "exec sleep 5"), Duration::from_millis(200));
         let started = Instant::now();
-        assert_eq!(slow.query_temperature(), None);
+        assert_eq!(slow.query(), None);
         assert!(
             started.elapsed() < Duration::from_secs(3),
             "the hung process was killed"
         );
 
         let missing = NvidiaSmi::new(dir.join("nope"), NvidiaSmi::DEFAULT_TIMEOUT);
-        assert_eq!(missing.query_temperature(), None);
+        assert_eq!(missing.query(), None);
     }
 }

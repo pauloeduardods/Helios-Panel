@@ -4,7 +4,10 @@ Laptop sensors and the platform profile for Linux, with a GNOME Shell top-bar ex
 
 - the **CPU** and **GPU** temperature, changing color as they heat up;
 - the current **power profile** (Eco, Quiet, Balanced, Performance, Turbo), switchable from the menu;
-- optionally, the **fan** speed.
+- optionally, the **fan** speed;
+- optionally, the **power draw** while on battery (a dimmed `AC` when plugged in).
+
+The menu also shows the battery charge and state, the time left, the battery health (full capacity against the design capacity) and the NVIDIA GPU's power draw.
 
 It was built for the Acer Predator Helios Neo 16 (PHN16-72), but it works on any PC with sensors in `/sys/class/hwmon`, including Ryzen CPUs and Radeon GPUs.
 
@@ -71,9 +74,15 @@ What goes where:
 | NVIDIA GPU | `nvidia-smi`, **only while the card is awake** |
 | AMD GPU | `amdgpu` hwmon (prefers the discrete one) |
 | Fans | `acer` hwmon (from `acer_wmi`) |
+| Power source, battery, draw | `/sys/class/power_supply` (the laptop's own `Mains` and `Battery`; peripherals such as a wireless mouse are skipped) |
+| NVIDIA GPU draw | `nvidia-smi`, in the same query as the temperature |
 | Profile | `/sys/firmware/acpi/platform_profile` |
 
 Reading never needs root. heliosd reads everything once every 2 seconds for all clients, and clients are told only when something changes.
+
+### Why the draw is only shown on battery
+
+On AC, Linux has no reading for what the whole laptop draws. On battery it does: what flows out of the battery. So the panel shows watts on battery and `AC` when plugged in. The time left uses the draw averaged over about a minute, so a short spike does not make it jump.
 
 ### The NVIDIA GPU shows "off"
 

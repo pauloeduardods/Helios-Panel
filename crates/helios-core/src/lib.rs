@@ -9,6 +9,7 @@ pub mod doctor;
 pub mod hwmon;
 pub mod io;
 pub mod nvidia;
+pub mod power;
 pub mod profile;
 pub mod status;
 
