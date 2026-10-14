@@ -1,7 +1,7 @@
 # Architecture
 
 > **Status:** helios-core, heliosctl, heliosd, the D-Bus extension and the
-> installer are implemented. `heliosctl doctor` and lighting are still
+> installer and `heliosctl doctor` are implemented. Lighting is still
 > planned (see the [migration plan](#migration-plan)).
 
 ## Goals and scope
@@ -66,7 +66,7 @@ crates/
 │   ├── src/nvidia.rs        PCI lookup, runtime-PM gate, query interval
 │   ├── src/profile.rs       platform profile state, validation, write path
 │   ├── src/status.rs        Status struct (serde) shared by CLI JSON and daemon
-│   └── src/doctor.rs        checks over an injected fs (task 5)
+│   └── src/doctor.rs        read-only setup checks over the injected fs
 ├── helios-sys/            lib, RootedFs, NvidiaSmi, SystemClock
 ├── heliosd/               bin, zbus + polkit, uses helios-core + helios-sys
 │   └── tests/bus.rs         integration tests on a private bus
@@ -137,7 +137,7 @@ pub trait Clock {
 
 ```
 heliosctl status [--json]   readings + profile, read-only, no daemon or root needed
-heliosctl doctor            diagnosis, read-only, prints suggested commands (task 5)
+heliosctl doctor [--json]   diagnosis, read-only, prints suggested commands
 ```
 
 `status --json` prints the shared `Status` struct:
@@ -344,7 +344,7 @@ lib/
   - **daemon not running**: the name has no owner and activation failed, or
     the proxies could not be created. The panel shows one dimmed segment
     (`helios off`). The menu shows "heliosd is not running" and the command to
-    check it (`systemctl status heliosd`). Profile items are hidden. When the name appears,
+    find out why (`heliosctl doctor`). Profile items are hidden. When the name appears,
     the client recreates the proxy and the indicator goes back to normal, with
     no reload needed.
 - `SetProfile` is called asynchronously with a long timeout, because polkit may
@@ -420,7 +420,7 @@ that uninstall leaves the tree byte-for-byte as it was.
 |---|---|
 | 3 | workspace, helios-core, `heliosctl status [--json]`, ported tests; CI starts running cargo (done) |
 | 4 | heliosd (sensors, profile, `SetProfile`, polkit), data files, extension becomes a D-Bus client, `lib/core`/`lib/sys`/udev rule removed (done) |
-| 5 | `heliosctl doctor` |
+| 5 | `heliosctl doctor` (done) |
 | 6 | `install.sh` for extension + daemon, manifest-based `--uninstall` (done, before task 5) |
 | 7 | lighting research and API proposal (plan only) |
 

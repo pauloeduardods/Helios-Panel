@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use helios_core::fake::{AMD_DESKTOP, PHN16_72};
+use helios_core::fake::{AMD_DESKTOP, PHN16_72, PHN16_72_SYSTEM};
 use serde_json::Value;
 
 const GPU_STATUS: &str = "sys/bus/pci/devices/0000:01:00.0/power/runtime_status";
@@ -177,4 +177,95 @@ fn empty_tree_still_reports() {
     assert_eq!(status["cpu"]["sensor"], Value::Null);
     assert_eq!(status["gpu"]["state"], "none");
     assert_eq!(status["profile"]["available"], false);
+}
+
+fn healthy_phn16_72() -> Vec<(&'static str, &'static str)> {
+    PHN16_72.iter().chain(PHN16_72_SYSTEM).copied().collect()
+}
+
+#[test]
+fn doctor_on_a_healthy_phn16_72_finds_nothing_and_writes_nothing() {
+    let fx = Fixture::new(&healthy_phn16_72());
+    let before = fx.snapshot();
+    let out = fx.run(&["doctor"]);
+    let text = String::from_utf8(out.stdout).unwrap();
+    assert_eq!(out.status.code(), Some(0), "{text}");
+    assert!(
+        text.starts_with(
+            "[ ok ] machine          Acer Predator PHN16-72 (Predator Helios Neo 16), BIOS V1.20\n"
+        ),
+        "{text}"
+    );
+    assert!(
+        text.contains("[ ok ] heliosd          installed and running (pid 4242)"),
+        "{text}"
+    );
+    assert!(text.ends_with("Nothing to fix.\n"), "{text}");
+    assert_eq!(fx.snapshot(), before, "doctor must not write anything");
+    assert_eq!(fx.smi_runs(), 0, "doctor never runs nvidia-smi");
+}
+
+#[test]
+fn doctor_on_a_broken_setup_suggests_commands_and_writes_nothing() {
+    let files: Vec<_> = healthy_phn16_72()
+        .into_iter()
+        .filter(|(p, _)| {
+            !p.starts_with("/sys/module")
+                && !p.starts_with("/sys/firmware")
+                && !p.starts_with("/sys/class/platform-profile")
+                && !p.starts_with("/usr/")
+                && !p.starts_with("/etc/systemd")
+        })
+        .chain([("/etc/modprobe.d/blacklist-acer.conf", "blacklist acer_wmi")])
+        .collect();
+    let fx = Fixture::new(&files);
+    let before = fx.snapshot();
+    let out = fx.run(&["doctor"]);
+    let text = String::from_utf8(out.stdout).unwrap();
+    assert_eq!(
+        out.status.code(),
+        Some(1),
+        "problems give exit status 1: {text}"
+    );
+    assert!(text.contains("[FAIL] acer_wmi"), "{text}");
+    assert!(text.contains("[FAIL] platform_profile"), "{text}");
+    assert!(
+        text.contains("[warn] heliosd          heliosd is not installed"),
+        "{text}"
+    );
+    assert!(
+        text.contains("  sudoedit /etc/modprobe.d/blacklist-acer.conf   # delete the line: blacklist acer_wmi\n"),
+        "{text}"
+    );
+    assert!(
+        text.contains("  sudo modprobe acer_wmi predator_v4=1\n"),
+        "{text}"
+    );
+    assert!(text.contains("  ./install.sh\n"), "{text}");
+    assert_eq!(fx.snapshot(), before, "doctor must not write anything");
+}
+
+#[test]
+fn doctor_json() {
+    let fx = Fixture::new(&healthy_phn16_72());
+    let out = fx.run(&["doctor", "--json"]);
+    assert_eq!(out.status.code(), Some(0));
+    let report: Value = serde_json::from_slice(&out.stdout).unwrap();
+    let checks: Vec<&str> = report["findings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|f| f["check"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        checks,
+        [
+            "machine",
+            "acer_wmi",
+            "predator_v4",
+            "platform_profile",
+            "heliosd"
+        ]
+    );
+    assert_eq!(report["findings"][0]["level"], "ok");
 }

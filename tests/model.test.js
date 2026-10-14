@@ -87,7 +87,7 @@ test('daemon not running and connecting states have messages', () => {
     assert.deepEqual(daemonMessage('not-running'), {
         panel: 'helios off',
         menu: 'heliosd is not running',
-        hint: 'Check it with: systemctl status heliosd',
+        hint: 'Find out why with: heliosctl doctor',
     });
     assert.equal(daemonMessage('connecting').panel, '--');
     assert.equal(daemonMessage('running'), null);

@@ -95,7 +95,7 @@ export default class HeliosPanelPreferences extends ExtensionPreferences {
 
         const diag = new Adw.PreferencesGroup({title: 'Diagnostics'});
         if (!daemon) {
-            diag.add(infoRow('heliosd', 'not running — check it with: systemctl status heliosd'));
+            diag.add(infoRow('heliosd', 'not running — find out why with: heliosctl doctor'));
         } else {
             const {profile} = daemon;
             diag.add(infoRow('heliosd', `running, version ${daemon.version ?? '?'}`));

@@ -50,6 +50,44 @@ pub const PHN16_72: &[(&str, &str)] = &[
     ),
 ];
 
+/// The rest of a healthy PHN16-72 for `doctor`: DMI, acer_wmi loaded with
+/// predator_v4 from modprobe.d, heliosd installed and running.
+pub const PHN16_72_SYSTEM: &[(&str, &str)] = &[
+    ("/sys/class/dmi/id/sys_vendor", "Acer"),
+    ("/sys/class/dmi/id/product_name", "Predator PHN16-72"),
+    ("/sys/class/dmi/id/product_family", "Predator Helios Neo 16"),
+    ("/sys/class/dmi/id/bios_version", "V1.20"),
+    ("/sys/module/acer_wmi/parameters/predator_v4", "Y"),
+    (
+        "/etc/modprobe.d/acer-predator.conf",
+        "options acer_wmi predator_v4=1",
+    ),
+    (
+        "/etc/modprobe.d/blacklist.conf",
+        "blacklist evbug\nblacklist nouveau",
+    ),
+    (
+        "/proc/cmdline",
+        "BOOT_IMAGE=/boot/vmlinuz-7.0.0-38-generic ro quiet splash",
+    ),
+    ("/proc/1/comm", "systemd"),
+    ("/proc/4242/comm", "heliosd"),
+    ("/usr/local/libexec/heliosd", "binary"),
+    ("/etc/systemd/system/heliosd.service", "[Service]"),
+    (
+        "/usr/share/dbus-1/system.d/io.github.pauloeduardods.Helios1.conf",
+        "<busconfig/>",
+    ),
+    (
+        "/usr/share/dbus-1/system-services/io.github.pauloeduardods.Helios1.service",
+        "[D-BUS Service]",
+    ),
+    (
+        "/usr/share/polkit-1/actions/io.github.pauloeduardods.helios.policy",
+        "<policyconfig/>",
+    ),
+];
+
 /// A Ryzen desktop with an AMD iGPU and a discrete Radeon, no fans exposed
 /// and no platform profile.
 pub const AMD_DESKTOP: &[(&str, &str)] = &[
