@@ -109,7 +109,7 @@ pub trait Clock {
   are at least `max(10 s, 2 × autosuspend_delay + 1 s)` apart (an unreadable
   delay, as on the PHN16-72 with fine-grained RTD3, which returns EIO, falls back
   to 10 s), so the daemon's own polling cannot keep the GPU awake.
-  The daemon never wakes the GPU. The `allow-wake-dgpu` option goes away.
+  A GPU that is not awake is never woken. The `allow-wake-dgpu` option goes away.
 
 ### heliosd
 
@@ -251,6 +251,7 @@ Description=Helios laptop sensors and platform profile daemon
 Type=dbus
 BusName=io.github.pauloeduardods.Helios1
 ExecStart=/usr/local/libexec/heliosd
+Restart=on-failure
 
 # root without privileges: ownership is enough for the profile file
 CapabilityBoundingSet=
@@ -362,7 +363,7 @@ No test ever touches the real `/sys`, the real system bus or the real polkit.
 
 ## License
 
-**Recommendation: GPL-3.0-or-later for the whole repository** (one `LICENSE`
+**Decision: GPL-3.0-or-later for the whole repository** (one `LICENSE`
 file, `license = "GPL-3.0-or-later"` in every crate, SPDX headers).
 
 - The repository has no license today, so nobody else can legally reuse it.
@@ -410,13 +411,12 @@ udev-granted direct write. helios-core is a port of `lib/core` + the gating in
 | 6 | `install.sh` for extension + daemon, manifest-based `--uninstall` |
 | 7 | lighting research and API proposal (plan only) |
 
-## Open decisions
+## Decisions
 
-1. **Bus name** `io.github.pauloeduardods.Helios1`: OK?
-2. **The daemon never wakes the NVIDIA GPU**, and `allow-wake-dgpu` is removed. OK?
-3. **The extension has no fallback without the daemon** (no local reads, no
-   power-profiles-daemon). It shows "daemon not running" instead. OK?
-4. **License**: GPL-3.0-or-later (recommended) or MIT OR Apache-2.0?
-5. **Rust toolchain**: this machine has none. Task 3 needs `rustup`, installed
-   per user under `~/.cargo`, with no system changes. You run the command yourself:
-   `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`
+| # | Decision | Status |
+|---|---|---|
+| 1 | Bus name `io.github.pauloeduardods.Helios1` | approved |
+| 2 | An NVIDIA GPU that is not awake is never woken: it is queried only while `runtime_status` is `active`. `allow-wake-dgpu` is removed | approved |
+| 3 | The extension has no fallback without the daemon; it shows "daemon not running" | under review |
+| 4 | License GPL-3.0-or-later (`LICENSE` and SPDX headers added in task 3) | approved |
+| 5 | Rust toolchain via per-user `rustup` | done |
