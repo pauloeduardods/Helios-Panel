@@ -70,3 +70,5 @@ journalctl -f -o cat /usr/bin/gnome-shell | grep -i helios
 ```
 
 The code layout and the plan for adding lighting control are in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
+Commits and pull request titles follow [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/); see [CONTRIBUTING.md](CONTRIBUTING.md).
