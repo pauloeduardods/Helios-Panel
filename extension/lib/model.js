@@ -134,7 +134,7 @@ export function daemonMessage(state) {
         return {
             panel: 'helios off',
             menu: 'heliosd is not running',
-            hint: 'Check it with: systemctl status heliosd',
+            hint: 'Find out why with: heliosctl doctor',
         };
     case 'connecting':
         return {panel: '--', menu: 'Connecting to heliosd…', hint: ''};
