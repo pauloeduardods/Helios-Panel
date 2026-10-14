@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # The job id is the required status check on main ("checks"); renaming it
+  # means updating the "Protect main" ruleset too.
+  checks:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: npm test
+        run: npm test
+
+      - name: npm run check
+        run: npm run check
+
+      - name: Validate GSettings schema
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libglib2.0-bin
+          glib-compile-schemas --strict --dry-run extension/schemas
+
+      # Rust workspace (helios-core, heliosd, heliosctl): these steps start
+      # running as soon as a Cargo.toml lands at the repository root.
+      - name: cargo test
+        if: hashFiles('Cargo.toml') != ''
+        run: cargo test --workspace --locked
+
+      - name: cargo clippy
+        if: hashFiles('Cargo.toml') != ''
+        run: |
+          rustup component add clippy
+          cargo clippy --workspace --all-targets --locked -- -D warnings
