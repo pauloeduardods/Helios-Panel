@@ -36,6 +36,9 @@ jobs:
       - name: npm run check
         run: npm run check
 
+      - name: shellcheck
+        run: shellcheck install.sh
+
       - name: Validate GSettings schema and data files
         run: |
           glib-compile-schemas --strict --dry-run extension/schemas
