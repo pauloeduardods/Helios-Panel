@@ -1,7 +1,7 @@
 # Architecture
 
-> **Status:** helios-core, heliosctl, heliosd and the D-Bus extension are
-> implemented. `heliosctl doctor`, the full installer and lighting are still
+> **Status:** helios-core, heliosctl, heliosd, the D-Bus extension and the
+> installer are implemented. `heliosctl doctor` and lighting are still
 > planned (see the [migration plan](#migration-plan)).
 
 ## Goals and scope
@@ -400,9 +400,16 @@ file, `license = "GPL-3.0-or-later"` in every crate, SPDX headers).
 | D-Bus activation | `/usr/share/dbus-1/system-services/io.github.pauloeduardods.Helios1.service` |
 | polkit actions | `/usr/share/polkit-1/actions/io.github.pauloeduardods.helios.policy` |
 
-`install.sh` asks for `sudo` only for the system part, records every path it
-created in a manifest, and `--uninstall` removes exactly those. It never
-touches modprobe, kernel parameters, initramfs or modules.
+`install.sh` builds as the user, asks for `sudo` once and uses it only for
+the system part (the extension is installed as the user). Every file and every
+directory it creates is recorded in `/usr/local/share/helios-panel/install-manifest`,
+and `--uninstall` removes exactly those: files first, then the directories it
+created, deepest first and only when empty. It refuses to overwrite a file it
+did not install, replaces an earlier extension-only install of the same UUID,
+reloads systemd and D-Bus and restarts an older heliosd. It never touches
+modprobe, kernel parameters, initramfs or modules. `tests/install.test.js`
+runs it in a temporary tree with fake `sudo`/`systemctl`/`busctl` and checks
+that uninstall leaves the tree byte-for-byte as it was.
 
 ## Migration plan
 
@@ -411,7 +418,7 @@ touches modprobe, kernel parameters, initramfs or modules.
 | 3 | workspace, helios-core, `heliosctl status [--json]`, ported tests; CI starts running cargo (done) |
 | 4 | heliosd (sensors, profile, `SetProfile`, polkit), data files, extension becomes a D-Bus client, `lib/core`/`lib/sys`/udev rule removed (done) |
 | 5 | `heliosctl doctor` |
-| 6 | `install.sh` for extension + daemon, manifest-based `--uninstall` |
+| 6 | `install.sh` for extension + daemon, manifest-based `--uninstall` (done, before task 5) |
 | 7 | lighting research and API proposal (plan only) |
 
 ## Decisions

@@ -6,7 +6,7 @@
   "description": "GNOME Shell extension: CPU/GPU temperature and platform profile in the top bar",
   "license": "GPL-3.0-or-later",
   "scripts": {
-    "test": "node --test tests/model.test.js && node --import ./tests/gi-stubs/register.mjs --test tests/client.test.js",
-    "check": "for f in $(find extension -name '*.js'); do node --check \"$f\" || exit 1; done && echo syntax ok"
+    "test": "node --test tests/model.test.js tests/install.test.js && node --import ./tests/gi-stubs/register.mjs --test tests/client.test.js",
+    "check": "for f in $(find extension -name '*.js'); do node --check \"$f\" || exit 1; done && bash -n install.sh && echo syntax ok"
   }
 }

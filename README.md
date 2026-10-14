@@ -30,41 +30,35 @@ Details are in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Install
 
-`install.sh` currently installs the extension only. Until it also installs the daemon, install heliosd by hand from a checkout:
-
-```bash
-cargo build --release
-sudo install -Dm755 target/release/heliosd   /usr/local/libexec/heliosd
-sudo install -Dm755 target/release/heliosctl /usr/local/bin/heliosctl
-sudo install -Dm644 data/heliosd.service /etc/systemd/system/heliosd.service
-sudo install -Dm644 data/io.github.pauloeduardods.Helios1.conf    /usr/share/dbus-1/system.d/io.github.pauloeduardods.Helios1.conf
-sudo install -Dm644 data/io.github.pauloeduardods.Helios1.service /usr/share/dbus-1/system-services/io.github.pauloeduardods.Helios1.service
-sudo install -Dm644 data/io.github.pauloeduardods.helios.policy   /usr/share/polkit-1/actions/io.github.pauloeduardods.helios.policy
-sudo systemctl daemon-reload
-```
-
-heliosd starts on demand the first time a client asks for it. To check it:
-
-```bash
-busctl --system introspect io.github.pauloeduardods.Helios1 /io/github/pauloeduardods/Helios1
-systemctl status heliosd
-```
-
-Then install the extension:
-
 ```bash
 ./install.sh
 ```
 
-On Wayland, GNOME only loads new extensions after you **log out and back in**. On X11, press Alt+F2, type `r` and press Enter. Then:
+That one command builds heliosd and heliosctl, installs the extension for your user and the system service (it asks for your password once, for `sudo`), and enables the extension. Run it again to upgrade.
 
-```bash
-gnome-extensions enable helios-panel@paulo
-```
+On Wayland, GNOME only picks up a new extension version after you **log out and back in** (on X11: Alt+F2, `r`, Enter). heliosd itself starts on demand.
 
 To configure it, open the extension menu → **Settings**, or run `gnome-extensions prefs helios-panel@paulo`.
 
-To remove the extension: `./install.sh --uninstall`.
+To remove everything:
+
+```bash
+./install.sh --uninstall
+```
+
+The installer records every file and directory it creates in `/usr/local/share/helios-panel/install-manifest`, and `--uninstall` removes exactly those, nothing else. It never touches kernel modules, modprobe configuration, kernel parameters or the initramfs. If a file it would install already exists and was not put there by it, it stops before changing anything.
+
+What goes where:
+
+| File | Destination |
+|---|---|
+| extension | `~/.local/share/gnome-shell/extensions/helios-panel@paulo/` |
+| heliosd | `/usr/local/libexec/heliosd` |
+| heliosctl | `/usr/local/bin/heliosctl` |
+| systemd unit | `/etc/systemd/system/heliosd.service` |
+| D-Bus policy | `/usr/share/dbus-1/system.d/io.github.pauloeduardods.Helios1.conf` |
+| D-Bus activation | `/usr/share/dbus-1/system-services/io.github.pauloeduardods.Helios1.service` |
+| polkit action | `/usr/share/polkit-1/actions/io.github.pauloeduardods.helios.policy` |
 
 ## Where each reading comes from
 
