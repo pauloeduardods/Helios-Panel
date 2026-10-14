@@ -47,4 +47,8 @@ MemoryDenyWriteExecute=yes
 SystemCallArchitectures=native
 SystemCallFilter=@system-service
 SystemCallFilter=~@privileged @resources
+# A blocked call fails with EPERM instead of killing the process: nvidia-smi
+# run as root tries chown() once and handles the error, but SIGSYS would
+# crash it (and pop up Ubuntu's crash reporter).
+SystemCallErrorNumber=EPERM
 UMask=0077

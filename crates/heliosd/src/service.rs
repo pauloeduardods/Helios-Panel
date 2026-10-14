@@ -300,6 +300,14 @@ mod tests {
         assert_eq!(unit_values("ProtectKernelModules"), ["yes"]);
         assert_eq!(unit_values("PrivateNetwork"), ["yes"]);
         assert_eq!(unit_values("DevicePolicy"), ["closed"]);
+        // Regression: the default seccomp action (kill) crashed nvidia-smi
+        // on its chown() with SIGSYS; blocked calls must fail with EPERM.
+        assert_eq!(unit_values("SystemCallErrorNumber"), ["EPERM"]);
+        assert_eq!(
+            unit_values("SystemCallFilter"),
+            ["@system-service", "~@privileged @resources"],
+            "the filter itself stays as tight as before"
+        );
         assert_eq!(
             unit_values("ExecStart"),
             ["/usr/local/libexec/heliosd"],
