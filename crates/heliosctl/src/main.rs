@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use helios_core::GpuQuery;
+use helios_core::doctor::{self, Level, Report};
 use helios_core::nvidia::GpuState;
 use helios_core::status::{Monitor, Status};
 use helios_sys::{NvidiaSmi, RootedFs, SystemClock};
@@ -14,14 +15,17 @@ Usage: heliosctl <command>
 
 Commands:
   status [--json]   Show temperatures, fans and the platform profile
+  doctor [--json]   Check what Helios needs and suggest fixes (changes nothing)
   help              Show this help
   version           Show the version
 
-Reading never needs root, and an NVIDIA GPU that is asleep is never woken.";
+Neither command needs root or changes anything. An NVIDIA GPU that is
+asleep is never woken. doctor exits with 1 when something needs attention.";
 
 #[derive(Debug, PartialEq, Eq)]
 enum Command {
     Status { json: bool },
+    Doctor { json: bool },
     Help,
     Version,
 }
@@ -59,11 +63,10 @@ fn parse_args(args: impl IntoIterator<Item = String>) -> Result<Options, String>
         ["version"] => Command::Version,
         ["status"] => Command::Status { json: false },
         ["status", "--json"] => Command::Status { json: true },
-        ["status", extra @ ..] => {
-            return Err(format!(
-                "unexpected argument to status: {}",
-                extra.join(" ")
-            ));
+        ["doctor"] => Command::Doctor { json: false },
+        ["doctor", "--json"] => Command::Doctor { json: true },
+        [cmd @ ("status" | "doctor"), extra @ ..] => {
+            return Err(format!("unexpected argument to {cmd}: {}", extra.join(" ")));
         }
         [cmd, ..] => return Err(format!("unknown command: {cmd}")),
     };
@@ -148,6 +151,51 @@ fn status(options: &Options, json: bool) -> Result<String, String> {
     }
 }
 
+fn render_doctor(report: &Report) -> String {
+    let mut out = String::new();
+    for f in &report.findings {
+        let tag = match f.level {
+            Level::Ok => " ok ",
+            Level::Info => "info",
+            Level::Warn => "warn",
+            Level::Fail => "FAIL",
+        };
+        out.push_str(&format!("[{tag}] {:<17}{}\n", f.check, f.message));
+    }
+    let fixes: Vec<_> = report
+        .findings
+        .iter()
+        .filter(|f| !f.fix.is_empty())
+        .collect();
+    if fixes.is_empty() {
+        out.push_str("\nNothing to fix.\n");
+    } else {
+        out.push_str("\nSuggested commands (run them yourself; heliosctl changes nothing):\n");
+        for f in fixes {
+            out.push_str(&format!("  # {}\n", f.check));
+            for cmd in &f.fix {
+                out.push_str(&format!("  {cmd}\n"));
+            }
+        }
+    }
+    out
+}
+
+fn run_doctor(options: &Options, json: bool) -> Result<(String, ExitCode), String> {
+    let report = doctor::run(&RootedFs::new(&options.sysfs_root));
+    let code = if report.has_problems() {
+        ExitCode::FAILURE
+    } else {
+        ExitCode::SUCCESS
+    };
+    let text = if json {
+        serde_json::to_string_pretty(&report).map_err(|e| e.to_string())? + "\n"
+    } else {
+        render_doctor(&report)
+    };
+    Ok((text, code))
+}
+
 fn main() -> ExitCode {
     let options = match parse_args(std::env::args().skip(1)) {
         Ok(options) => options,
@@ -156,15 +204,17 @@ fn main() -> ExitCode {
             return ExitCode::from(2);
         }
     };
+    let ok = |text: String| Ok((text, ExitCode::SUCCESS));
     let result = match options.command {
-        Command::Help => Ok(format!("{USAGE}\n")),
-        Command::Version => Ok(format!("heliosctl {}\n", env!("CARGO_PKG_VERSION"))),
-        Command::Status { json } => status(&options, json),
+        Command::Help => ok(format!("{USAGE}\n")),
+        Command::Version => ok(format!("heliosctl {}\n", env!("CARGO_PKG_VERSION"))),
+        Command::Status { json } => status(&options, json).and_then(ok),
+        Command::Doctor { json } => run_doctor(&options, json),
     };
     match result {
-        Ok(text) => {
+        Ok((text, code)) => {
             print!("{text}");
-            ExitCode::SUCCESS
+            code
         }
         Err(message) => {
             eprintln!("heliosctl: {message}");
@@ -210,6 +260,42 @@ mod tests {
         assert_eq!(o.sysfs_root, PathBuf::from("/tmp/x"));
         assert_eq!(o.nvidia_smi, Some(PathBuf::from("/bin/true")));
         assert_eq!(parse(&["status"]).unwrap().sysfs_root, PathBuf::from("/"));
+    }
+
+    #[test]
+    fn doctor_command() {
+        assert_eq!(
+            parse(&["doctor"]).unwrap().command,
+            Command::Doctor { json: false }
+        );
+        assert_eq!(
+            parse(&["doctor", "--json"]).unwrap().command,
+            Command::Doctor { json: true }
+        );
+        assert!(
+            parse(&["doctor", "--fix"])
+                .unwrap_err()
+                .contains("doctor: --fix")
+        );
+    }
+
+    #[test]
+    fn doctor_output_lists_findings_then_commands() {
+        let fs = FakeFs::new(PHN16_72);
+        let text = render_doctor(&doctor::run(&fs));
+        assert!(fs.writes().is_empty());
+        assert!(
+            text.starts_with("[info] machine          Unknown machine"),
+            "{text}"
+        );
+        assert!(
+            text.contains("[warn] heliosd          heliosd is not installed\n"),
+            "{text}"
+        );
+        assert!(
+            text.contains("Suggested commands (run them yourself; heliosctl changes nothing):\n")
+        );
+        assert!(text.ends_with("  # heliosd\n  ./install.sh\n"), "{text}");
     }
 
     #[test]
