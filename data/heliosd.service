@@ -1,0 +1,50 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+[Unit]
+Description=Helios laptop sensors and platform profile daemon
+Documentation=https://github.com/pauloeduardods/Helios-Panel
+
+[Service]
+Type=dbus
+BusName=io.github.pauloeduardods.Helios1
+ExecStart=/usr/local/libexec/heliosd
+Restart=on-failure
+
+# Root only because the platform profile file is root:root 0644. No
+# capabilities: file ownership alone allows that one write.
+CapabilityBoundingSet=
+AmbientCapabilities=
+NoNewPrivileges=yes
+
+# Everything read-only ...
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+ProcSubset=all
+# ... except the platform profile (legacy file and the acer-wmi class device).
+ReadWritePaths=-/sys/firmware/acpi/platform_profile
+ReadWritePaths=-/sys/devices/platform/acer-wmi/platform-profile
+
+# Devices: only what nvidia-smi needs to read a temperature (already 0666).
+DevicePolicy=closed
+DeviceAllow=char-nvidia rw
+DeviceAllow=char-nvidiactl rw
+
+PrivateNetwork=yes
+IPAddressDeny=any
+RestrictAddressFamilies=AF_UNIX
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+UMask=0077

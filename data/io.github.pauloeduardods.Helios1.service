@@ -1,0 +1,7 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# D-Bus activation: the first client starts heliosd.service through systemd.
+[D-BUS Service]
+Name=io.github.pauloeduardods.Helios1
+Exec=/bin/false
+User=root
+SystemdService=heliosd.service

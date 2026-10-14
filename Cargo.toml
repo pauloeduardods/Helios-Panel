@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/helios-core", "crates/helios-sys", "crates/heliosctl"]
+members = ["crates/helios-core", "crates/helios-sys", "crates/heliosctl", "crates/heliosd"]
 
 [workspace.package]
 version = "0.2.0"
