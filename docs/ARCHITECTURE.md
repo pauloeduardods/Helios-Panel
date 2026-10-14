@@ -38,11 +38,15 @@ validated D-Bus methods, each behind its own polkit action.
 └──────────────────┘            │ uses
         │ uses                  ▼
         └──────────────▶ helios-core (pure library)
+                         helios-sys  (real I/O adapters for it)
 ```
 
 - **helios-core**: all the logic: sensor discovery, NVIDIA power gating
   and rate limiting, profile parsing/validation, and the doctor checks. No D-Bus,
   no processes, no direct I/O. Everything goes through injected traits.
+- **helios-sys**: the real implementations of the core traits: `RootedFs`
+  (sysfs access under a root directory), `NvidiaSmi` (fixed argv, timeout)
+  and `SystemClock`. Shared by both binaries so they do not duplicate I/O code.
 - **heliosd**: the system service. It owns the bus name, keeps the current
   readings, runs `nvidia-smi` when allowed, checks polkit and performs the
   two kinds of write.
@@ -55,18 +59,21 @@ validated D-Bus methods, each behind its own polkit action.
 ## Cargo workspace
 
 ```
-Cargo.toml                 [workspace], shared lints, edition 2021
+Cargo.toml                 [workspace], shared lints, edition 2024
 crates/
 ├── helios-core/           lib, no D-Bus/process/IO dependencies
-│   ├── src/fs.rs            trait SysFs + in-memory FakeFs (cfg(test) / "fake" feature)
+│   ├── src/io.rs            traits SysFs, GpuQuery, Clock
+│   ├── src/fake.rs          FakeFs/FakeGpu/FakeClock + PHN16-72 and AMD fixtures ("fake" feature)
 │   ├── src/hwmon.rs         scan, CPU/AMD GPU/fan resolution, sensor ids
 │   ├── src/nvidia.rs        PCI lookup, runtime-PM gate, query interval
 │   ├── src/profile.rs       platform profile state, validation, write path
 │   ├── src/status.rs        Status struct (serde) shared by CLI JSON and daemon
 │   └── src/doctor.rs        checks over an injected fs (task 5)
-├── heliosd/               bin, zbus + polkit, uses helios-core with RootedFs
+├── helios-sys/            lib, RootedFs, NvidiaSmi, SystemClock
+├── heliosd/               bin, zbus + polkit, uses helios-core + helios-sys
 │   └── tests/bus.rs         integration tests on a private bus
-└── heliosctl/             bin, clap, uses helios-core with RootedFs
+└── heliosctl/             bin, uses helios-core + helios-sys
+    └── tests/cli.rs         runs the binary against fixture trees on disk
 data/
 ├── heliosd.service                                    systemd unit
 ├── io.github.pauloeduardods.Helios1.conf              D-Bus system policy
@@ -97,15 +104,17 @@ pub trait Clock {
 }
 ```
 
-- `RootedFs { root }` (in each binary, not in core) maps `/sys/...` to
+- `RootedFs { root }` (in helios-sys, not in core) maps `/sys/...` to
   `root/sys/...`. Production uses `/`. Tests use a temporary directory.
 - `profile::validate(requested, &state) -> Result<ProfileTarget, ProfileError>`
   accepts only a value present in the **current** `platform_profile_choices`
   (or the class device `choices`), and returns the path to write. Writes always
   go through `profile::apply(fs, target)`, which writes and reads back.
 - The NVIDIA reader is a state machine over `SysFs + GpuQuery + Clock`: it reads
-  `power/runtime_status` and calls `GpuQuery` only when the status is `active`.
-  `suspended`, `suspending` and `resuming` all mean "off" and **no query**. Queries
+  `power/runtime_status` and calls `GpuQuery` only when the GPU is awake:
+  `active`, or `unsupported` (runtime PM disabled, so it is always powered).
+  `suspended`, `suspending`, `resuming` and a missing or unknown status all
+  mean "off" and **no query**. Queries
   are at least `max(10 s, 2 × autosuspend_delay + 1 s)` apart (an unreadable
   delay, as on the PHN16-72 with fine-grained RTD3, which returns EIO, falls back
   to 10 s), so the daemon's own polling cannot keep the GPU awake.
@@ -416,7 +425,7 @@ udev-granted direct write. helios-core is a port of `lib/core` + the gating in
 | # | Decision | Status |
 |---|---|---|
 | 1 | Bus name `io.github.pauloeduardods.Helios1` | approved |
-| 2 | An NVIDIA GPU that is not awake is never woken: it is queried only while `runtime_status` is `active`. `allow-wake-dgpu` is removed | approved |
-| 3 | The extension has no fallback without the daemon; it shows "daemon not running" | under review |
-| 4 | License GPL-3.0-or-later (`LICENSE` and SPDX headers added in task 3) | approved |
+| 2 | An NVIDIA GPU that is not awake is never woken: it is queried only while `runtime_status` is `active` (or `unsupported`, i.e. always powered). `allow-wake-dgpu` is removed | approved |
+| 3 | The extension has no fallback without the daemon; it shows "daemon not running" | approved |
+| 4 | License GPL-3.0-or-later (`LICENSE` and SPDX headers added in task 3) | done |
 | 5 | Rust toolchain via per-user `rustup` | done |
