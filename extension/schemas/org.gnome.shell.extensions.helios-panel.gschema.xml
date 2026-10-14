@@ -3,52 +3,52 @@
   <schema id="org.gnome.shell.extensions.helios-panel" path="/org/gnome/shell/extensions/helios-panel/">
 
     <!-- What the top bar shows -->
-    <key name="show-cpu" type="b"><default>true</default><summary>Mostrar temperatura da CPU</summary></key>
-    <key name="show-gpu" type="b"><default>true</default><summary>Mostrar temperatura da GPU</summary></key>
-    <key name="show-fans" type="b"><default>false</default><summary>Mostrar rotação das ventoinhas</summary></key>
-    <key name="show-profile" type="b"><default>true</default><summary>Mostrar perfil de energia</summary></key>
-    <key name="show-icons" type="b"><default>true</default><summary>Mostrar ícones</summary></key>
-    <key name="show-unit" type="b"><default>false</default><summary>Mostrar "°C" em vez de "°"</summary></key>
-    <key name="hide-gpu-when-off" type="b"><default>false</default><summary>Esconder a GPU quando ela estiver desligada</summary></key>
+    <key name="show-cpu" type="b"><default>true</default><summary>Show CPU temperature</summary></key>
+    <key name="show-gpu" type="b"><default>true</default><summary>Show GPU temperature</summary></key>
+    <key name="show-fans" type="b"><default>false</default><summary>Show fan speed</summary></key>
+    <key name="show-profile" type="b"><default>true</default><summary>Show power profile</summary></key>
+    <key name="show-icons" type="b"><default>true</default><summary>Show icons</summary></key>
+    <key name="show-unit" type="b"><default>false</default><summary>Show "°C" instead of "°"</summary></key>
+    <key name="hide-gpu-when-off" type="b"><default>false</default><summary>Hide the GPU when it is off</summary></key>
 
     <key name="profile-names" type="s">
       <choices><choice value="predator"/><choice value="portuguese"/><choice value="linux"/></choices>
       <default>'predator'</default>
-      <summary>Nomes dos perfis</summary>
+      <summary>Profile names</summary>
     </key>
-    <key name="color-profile" type="b"><default>true</default><summary>Colorir o perfil conforme a potência</summary></key>
+    <key name="color-profile" type="b"><default>true</default><summary>Color the profile by power level</summary></key>
 
     <!-- Placement -->
     <key name="panel-position" type="s">
       <choices><choice value="left"/><choice value="center"/><choice value="right"/></choices>
       <default>'right'</default>
-      <summary>Posição na barra</summary>
+      <summary>Position in the top bar</summary>
     </key>
-    <key name="panel-index" type="i"><range min="0" max="20"/><default>0</default><summary>Ordem dentro da área</summary></key>
+    <key name="panel-index" type="i"><range min="0" max="20"/><default>0</default><summary>Order within the area</summary></key>
 
     <!-- Refresh -->
-    <key name="refresh-interval" type="i"><range min="1" max="60"/><default>2</default><summary>Intervalo de atualização (s)</summary></key>
+    <key name="refresh-interval" type="i"><range min="1" max="60"/><default>2</default><summary>Refresh interval (s)</summary></key>
 
     <!-- Thresholds (°C) -->
-    <key name="cpu-warm" type="i"><range min="30" max="110"/><default>80</default><summary>CPU: morno a partir de</summary></key>
-    <key name="cpu-hot" type="i"><range min="30" max="110"/><default>92</default><summary>CPU: quente a partir de</summary></key>
-    <key name="gpu-warm" type="i"><range min="30" max="110"/><default>75</default><summary>GPU: morna a partir de</summary></key>
-    <key name="gpu-hot" type="i"><range min="30" max="110"/><default>85</default><summary>GPU: quente a partir de</summary></key>
+    <key name="cpu-warm" type="i"><range min="30" max="110"/><default>80</default><summary>CPU: warm from</summary></key>
+    <key name="cpu-hot" type="i"><range min="30" max="110"/><default>92</default><summary>CPU: hot from</summary></key>
+    <key name="gpu-warm" type="i"><range min="30" max="110"/><default>75</default><summary>GPU: warm from</summary></key>
+    <key name="gpu-hot" type="i"><range min="30" max="110"/><default>85</default><summary>GPU: hot from</summary></key>
 
     <!-- Colours (any CSS colour; empty = theme colour) -->
-    <key name="color-normal" type="s"><default>''</default><summary>Cor normal</summary></key>
-    <key name="color-warm" type="s"><default>'#f8e45c'</default><summary>Cor morno</summary></key>
-    <key name="color-hot" type="s"><default>'#f66151'</default><summary>Cor quente</summary></key>
-    <key name="bold-when-hot" type="b"><default>true</default><summary>Negrito quando quente</summary></key>
+    <key name="color-normal" type="s"><default>''</default><summary>Normal color</summary></key>
+    <key name="color-warm" type="s"><default>'#f8e45c'</default><summary>Warm color</summary></key>
+    <key name="color-hot" type="s"><default>'#f66151'</default><summary>Hot color</summary></key>
+    <key name="bold-when-hot" type="b"><default>true</default><summary>Bold when hot</summary></key>
 
     <!-- Sensors -->
-    <key name="cpu-sensor" type="s"><default>''</default><summary>Sensor da CPU ('' = automático)</summary></key>
-    <key name="gpu-sensor" type="s"><default>''</default><summary>Sensor da GPU ('' = automático, 'nvidia-smi', ou hwmon:chip/label)</summary></key>
+    <key name="cpu-sensor" type="s"><default>''</default><summary>CPU sensor ('' = automatic)</summary></key>
+    <key name="gpu-sensor" type="s"><default>''</default><summary>GPU sensor ('' = automatic, 'nvidia-smi', or hwmon:chip/label)</summary></key>
     <key name="allow-wake-dgpu" type="b">
       <default>false</default>
-      <summary>Permitir acordar a GPU dedicada para ler a temperatura</summary>
-      <description>Desligado: quando a NVIDIA estiver em repouso o painel mostra "off" e não a acorda (economiza bateria).</description>
+      <summary>Allow waking the discrete GPU to read its temperature</summary>
+      <description>Off: while the NVIDIA GPU is asleep the panel shows "off" and does not wake it (saves battery).</description>
     </key>
-    <key name="gpu-min-interval" type="i"><range min="2" max="120"/><default>10</default><summary>Intervalo mínimo entre leituras da NVIDIA (s)</summary></key>
+    <key name="gpu-min-interval" type="i"><range min="2" max="120"/><default>10</default><summary>Minimum interval between NVIDIA readings (s)</summary></key>
   </schema>
 </schemalist>

@@ -106,11 +106,11 @@ test('profile: read-only by default, direct write once udev made it writable', (
 test('PlatformProfileBackend validates before writing', async () => {
     const {PlatformProfileBackend, SwitchMode} = await import('../extension/lib/backends/platform.js');
     const backend = new PlatformProfileBackend();
-    assert.throws(() => backend.setPlatformProfile('performance'), /gravável/);
+    assert.throws(() => backend.setPlatformProfile('performance'), /not writable/);
     const p = '/sys/class/platform-profile/platform-profile-0/profile';
     globalThis.FAKE_WRITABLE = [p];
     assert.equal(await backend.switchMode(), SwitchMode.DIRECT);
-    assert.throws(() => backend.setPlatformProfile('max-power'), /não é suportado/);
+    assert.throws(() => backend.setPlatformProfile('max-power'), /not supported/);
     backend.setPlatformProfile('quiet');
     assert.equal(sysfsMod.readText(p), 'quiet');
 });

@@ -1,75 +1,75 @@
-# Arquitetura
+# Architecture
 
-O código tem uma regra central: **a interface só desenha**. Quem fala com o hardware fica em camadas separadas, para dar para adicionar recursos novos (como a iluminação) sem mexer no painel.
+The code has one central rule: **the UI only draws**. Whatever talks to the hardware lives in separate layers, so new features (such as lighting) can be added without touching the panel.
 
 ```
 extension/
-├── extension.js            ciclo de vida: cria/remove o indicador e o posiciona
-├── prefs.js                janela de configurações (libadwaita)
-├── schemas/                configurações (GSettings)
-├── icons/                  ícones simbólicos do painel
+├── extension.js            lifecycle: creates/removes the indicator and places it
+├── prefs.js                settings window (libadwaita)
+├── schemas/                settings (GSettings)
+├── icons/                  symbolic panel icons
 └── lib/
-    ├── core/               LÓGICA PURA - sem nenhum import do GNOME
-    │   ├── format.js         níveis de temperatura, formatação, intervalo da GPU
-    │   ├── profiles.js       nomes dos perfis, cores, mapeamento para o PPD
-    │   ├── hwmon.js          descoberta de sensores em /sys/class/hwmon
-    │   └── platformProfile.js leitura do perfil e decisão de como trocá-lo
-    ├── sys/                ACESSO AO SISTEMA (GLib/Gio)
-    │   ├── sysfs.js          adaptador de arquivos usado pelo core
+    ├── core/               PURE LOGIC - no GNOME imports at all
+    │   ├── format.js         temperature levels, formatting, GPU interval
+    │   ├── profiles.js       profile names, colors, mapping to PPD
+    │   ├── hwmon.js          sensor discovery in /sys/class/hwmon
+    │   └── platformProfile.js reading the profile and deciding how to switch it
+    ├── sys/                SYSTEM ACCESS (GLib/Gio)
+    │   ├── sysfs.js          file adapter used by core
     │   ├── sensors.js        CpuSensor, GpuSensor, FanSensor
-    │   └── nvidia.js         nvidia-smi sem acordar a placa
-    ├── backends/           RECURSOS DO NOTEBOOK
-    │   ├── platform.js       perfil de energia (sysfs direto ou power-profiles-daemon)
-    │   └── lighting.js       ponto de extensão da iluminação (ainda vazio)
+    │   └── nvidia.js         nvidia-smi without waking the card
+    ├── backends/           LAPTOP FEATURES
+    │   ├── platform.js       power profile (direct sysfs or power-profiles-daemon)
+    │   └── lighting.js       lighting extension point (still empty)
     └── ui/
-        └── indicator.js      botão do painel e menu
+        └── indicator.js      panel button and menu
 ```
 
-## Por que o `core/` é puro
+## Why `core/` is pure
 
-Os módulos do `core/` recebem o sistema de arquivos como parâmetro (`fs = {readText, listDir, exists, isWritable}`). No GNOME, esse parâmetro é o `sysfs.js`. Nos testes, é uma árvore falsa em memória que imita um PHN16-72 ou um desktop AMD. Assim, a lógica que decide qual sensor usar roda no `npm test`, sem precisar de GNOME nem do notebook.
+The `core/` modules take the filesystem as a parameter (`fs = {readText, listDir, exists, isWritable}`). In GNOME, that parameter is `sysfs.js`. In the tests, it is a fake in-memory tree that mimics a PHN16-72 or an AMD desktop. That way, the logic that decides which sensor to use runs under `npm test`, without GNOME or the laptop.
 
-O `tests/system.test.js` vai um passo além: troca `gi://GLib` e `gi://Gio` por stubs e testa o código de `sys/` contra uma pasta `/sys` falsa. É isso que garante que a NVIDIA suspensa nunca é acordada.
+`tests/system.test.js` goes one step further: it replaces `gi://GLib` and `gi://Gio` with stubs and tests the `sys/` code against a fake `/sys` folder. That is what guarantees a suspended NVIDIA GPU is never woken up.
 
-## Regras para código que roda dentro do gnome-shell
+## Rules for code that runs inside gnome-shell
 
-- **Nada que bloqueie.** Ler arquivos do sysfs é instantâneo e pode ser síncrono. Processos (como o `nvidia-smi`) e chamadas D-Bus precisam ser assíncronos, com timeout.
-- **Nada de root.** A extensão roda dentro do processo da sua sessão gráfica. Tudo que precisa de privilégio vai para um helper separado (veja abaixo).
-- **Limpar tudo no `disable()`:** timers, sinais, processos. O indicador faz isso em `_onDestroy`.
+- **Nothing that blocks.** Reading sysfs files is instant and may be synchronous. Processes (such as `nvidia-smi`) and D-Bus calls must be asynchronous, with a timeout.
+- **No root.** The extension runs inside your graphical session's process. Anything that needs privileges goes to a separate helper (see below).
+- **Clean everything up in `disable()`:** timers, signals, processes. The indicator does this in `_cleanup`.
 
-## Adicionando a iluminação (futuro)
+## Adding lighting (future)
 
-No PHN16-72, o RGB do teclado e o logo da tampa passam pela interface WMI de gaming da Acer. O modelo não tem o chip ENEK5130 nem o teclado USB da Sunrex, então o caminho direto por `/dev/hidraw` não existe. Escrever nessa interface exige root. Por isso o caminho tem três partes:
+On the PHN16-72, the keyboard RGB and the lid logo go through Acer's gaming WMI interface. This model has neither the ENEK5130 chip nor the Sunrex USB keyboard, so the direct `/dev/hidraw` path does not exist. Writing to that interface requires root. That is why the path has three parts:
 
 ```
-indicador ──D-Bus──▶ helper privilegiado ──▶ WMI/ACPI ou módulo de kernel
-(lighting.js)        (serviço de sistema
-                      + regra polkit)
+indicator ──D-Bus──▶ privileged helper ──▶ WMI/ACPI or kernel module
+(lighting.js)        (system service
+                      + polkit rule)
 ```
 
-### 1. Descobrir o protocolo
+### 1. Figure out the protocol
 
-Antes de abrir um disassembler, olhe o que já existe:
-- O `facer.c` do projeto [predator-sense](https://github.com/cleyton1986/predator-sense) já implementa o teclado em 4 zonas por WMI (`ACER_CAP_GAMINGKB`, devices `/dev/acer-gkbbl*`). Está marcado como testado no PHN16-72. Ele é GPL-3: se copiar código, a extensão também precisa ser GPL-3.
-- Mesmo método, o Linuwu-Sense.
+Before opening a disassembler, look at what already exists:
+- `facer.c` from the [predator-sense](https://github.com/cleyton1986/predator-sense) project already implements the 4-zone keyboard over WMI (`ACER_CAP_GAMINGKB`, devices `/dev/acer-gkbbl*`). It is marked as tested on the PHN16-72. It is GPL-3: if code is copied, the extension must be GPL-3 too.
+- Same method: Linuwu-Sense.
 
-Para o que faltar (por exemplo, o logo da tampa):
-- **Dinâmico (mais fácil):** no Windows, com o PredatorSense aberto, capture as chamadas WMI (rastreamento ETW "WMI-Activity" no Visualizador de Eventos) enquanto muda cores. Você vê o método e os bytes enviados.
-- **Estático:** abra as DLLs de iluminação do PredatorSense no Ghidra, direto ou via REA, e procure os GUIDs WMI da Acer (`7A4DDFE7-…`) e os números de método. As tabelas ACPI (`acpidump` + `iasl -d`) mostram o que o firmware aceita.
-- Teste sempre começando por **leitura**, e uma escrita por vez.
+For whatever is missing (for example, the lid logo):
+- **Dynamic (easier):** on Windows, with PredatorSense open, capture the WMI calls (ETW "WMI-Activity" tracing in Event Viewer) while changing colors. You see the method and the bytes sent.
+- **Static:** open the PredatorSense lighting DLLs in Ghidra, directly or via REA, and look for the Acer WMI GUIDs (`7A4DDFE7-…`) and method numbers. The ACPI tables (`acpidump` + `iasl -d`) show what the firmware accepts.
+- Always start testing with **reads**, and one write at a time.
 
-### 2. O helper privilegiado
+### 2. The privileged helper
 
-Um serviço de sistema pequeno (Python ou Rust) no D-Bus de sistema, com:
-- uma lista **fechada** de ações (`SetKeyboard(zones, effect, brightness)`, `SetLogo(...)`), com todos os valores validados;
-- uma ação polkit própria. Para iluminação, `allow_active=yes` é aceitável, porque o pior caso é uma cor errada. Para ventoinhas, EC ou chave MUX, use `auth_admin`.
-- **nada** de escrita genérica ("escreva X no caminho Y") nem acesso cru ao EC. Foram os pontos fracos do predator-sense.
+A small system service (Python or Rust) on the system D-Bus, with:
+- a **closed** list of actions (`SetKeyboard(zones, effect, brightness)`, `SetLogo(...)`), with every value validated;
+- its own polkit action. For lighting, `allow_active=yes` is acceptable, because the worst case is a wrong color. For fans, EC or the MUX switch, use `auth_admin`.
+- **no** generic write ("write X to path Y") and no raw EC access. Those were predator-sense's weak points.
 
-### 3. O backend na extensão
+### 3. The backend in the extension
 
-Crie `lib/backends/acerWmiGaming.js` estendendo `LightingBackend`:
-- `probe()`: o helper está no D-Bus e o modelo é suportado?
-- `capabilities()`: alvos, zonas, efeitos.
-- `apply(state)`: chama o helper.
+Create `lib/backends/acerWmiGaming.js` extending `LightingBackend`:
+- `probe()`: is the helper on D-Bus and is the model supported?
+- `capabilities()`: targets, zones, effects.
+- `apply(state)`: calls the helper.
 
-Registre a classe no array `BACKENDS` em `lighting.js`. O indicador já chama `detectLightingBackend()` e cria a seção "Iluminação" no menu quando um backend responde. A partir daí, é só trocar o placeholder em `_updateLightingSection()` por controles de verdade.
+Register the class in the `BACKENDS` array in `lighting.js`. The indicator already calls `detectLightingBackend()` and creates the "Lighting" section in the menu when a backend responds. From there, it is just a matter of replacing the placeholder in `_updateLightingSection()` with real controls.

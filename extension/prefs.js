@@ -21,97 +21,97 @@ export default class HeliosPanelPreferences extends ExtensionPreferences {
     // ------------------------------------------------------------ pages
 
     _panelPage(settings) {
-        const page = new Adw.PreferencesPage({title: 'Painel', icon_name: 'video-display-symbolic'});
+        const page = new Adw.PreferencesPage({title: 'Panel', icon_name: 'video-display-symbolic'});
 
-        const show = new Adw.PreferencesGroup({title: 'O que mostrar na barra'});
-        show.add(switchRow(settings, 'show-cpu', 'Temperatura da CPU'));
-        show.add(switchRow(settings, 'show-gpu', 'Temperatura da GPU'));
-        show.add(switchRow(settings, 'hide-gpu-when-off', 'Esconder a GPU quando desligada',
-            'Senão mostra "off" esmaecido'));
-        show.add(switchRow(settings, 'show-fans', 'Rotação das ventoinhas'));
-        show.add(switchRow(settings, 'show-profile', 'Perfil de energia'));
-        show.add(switchRow(settings, 'show-icons', 'Ícones'));
-        show.add(switchRow(settings, 'show-unit', 'Mostrar "°C"', 'Desligado mostra só "°"'));
+        const show = new Adw.PreferencesGroup({title: 'Shown in the top bar'});
+        show.add(switchRow(settings, 'show-cpu', 'CPU temperature'));
+        show.add(switchRow(settings, 'show-gpu', 'GPU temperature'));
+        show.add(switchRow(settings, 'hide-gpu-when-off', 'Hide the GPU when it is off',
+            'Otherwise shows a dimmed "off"'));
+        show.add(switchRow(settings, 'show-fans', 'Fan speed'));
+        show.add(switchRow(settings, 'show-profile', 'Power profile'));
+        show.add(switchRow(settings, 'show-icons', 'Icons'));
+        show.add(switchRow(settings, 'show-unit', 'Show "°C"', 'When off, shows only "°"'));
         page.add(show);
 
-        const profile = new Adw.PreferencesGroup({title: 'Perfil'});
-        profile.add(comboRow(settings, 'profile-names', 'Nomes dos perfis', [
+        const profile = new Adw.PreferencesGroup({title: 'Profile'});
+        profile.add(comboRow(settings, 'profile-names', 'Profile names', [
             ['predator', 'PredatorSense (Quiet, Balanced, Turbo…)'],
-            ['portuguese', 'Português (Silencioso, Equilibrado…)'],
+            ['portuguese', 'Portuguese (Silencioso, Equilibrado…)'],
             ['linux', 'Linux (quiet, balanced, performance…)'],
         ]));
-        profile.add(switchRow(settings, 'color-profile', 'Colorir conforme a potência',
-            'Azul na economia, laranja no Performance, vermelho no Turbo'));
+        profile.add(switchRow(settings, 'color-profile', 'Color by power level',
+            'Blue for power saving, orange for Performance, red for Turbo'));
         page.add(profile);
 
-        const place = new Adw.PreferencesGroup({title: 'Posição e atualização'});
-        place.add(comboRow(settings, 'panel-position', 'Área da barra', [
-            ['left', 'Esquerda'], ['center', 'Centro'], ['right', 'Direita (perto do Wi-Fi)'],
+        const place = new Adw.PreferencesGroup({title: 'Position and refresh'});
+        place.add(comboRow(settings, 'panel-position', 'Top bar area', [
+            ['left', 'Left'], ['center', 'Center'], ['right', 'Right (next to Wi-Fi)'],
         ]));
-        place.add(spinRow(settings, 'panel-index', 'Ordem dentro da área', '0 = mais à esquerda', 0, 20));
-        place.add(spinRow(settings, 'refresh-interval', 'Atualizar a cada (segundos)', null, 1, 60));
+        place.add(spinRow(settings, 'panel-index', 'Order within the area', '0 = leftmost', 0, 20));
+        place.add(spinRow(settings, 'refresh-interval', 'Refresh every (seconds)', null, 1, 60));
         page.add(place);
         return page;
     }
 
     _temperaturePage(settings) {
-        const page = new Adw.PreferencesPage({title: 'Cores', icon_name: 'applications-graphics-symbolic'});
+        const page = new Adw.PreferencesPage({title: 'Colors', icon_name: 'applications-graphics-symbolic'});
 
-        const cpu = new Adw.PreferencesGroup({title: 'Limites da CPU (°C)'});
-        cpu.add(spinRow(settings, 'cpu-warm', 'Morna a partir de', null, 30, 110));
-        cpu.add(spinRow(settings, 'cpu-hot', 'Quente a partir de', null, 30, 110));
+        const cpu = new Adw.PreferencesGroup({title: 'CPU thresholds (°C)'});
+        cpu.add(spinRow(settings, 'cpu-warm', 'Warm from', null, 30, 110));
+        cpu.add(spinRow(settings, 'cpu-hot', 'Hot from', null, 30, 110));
         page.add(cpu);
 
-        const gpu = new Adw.PreferencesGroup({title: 'Limites da GPU (°C)'});
-        gpu.add(spinRow(settings, 'gpu-warm', 'Morna a partir de', null, 30, 110));
-        gpu.add(spinRow(settings, 'gpu-hot', 'Quente a partir de', null, 30, 110));
+        const gpu = new Adw.PreferencesGroup({title: 'GPU thresholds (°C)'});
+        gpu.add(spinRow(settings, 'gpu-warm', 'Warm from', null, 30, 110));
+        gpu.add(spinRow(settings, 'gpu-hot', 'Hot from', null, 30, 110));
         page.add(gpu);
 
-        const colors = new Adw.PreferencesGroup({title: 'Cores'});
-        colors.add(colorRow(settings, 'color-normal', 'Normal', 'Vazio = cor do tema'));
-        colors.add(colorRow(settings, 'color-warm', 'Morno', null));
-        colors.add(colorRow(settings, 'color-hot', 'Quente', null));
-        colors.add(switchRow(settings, 'bold-when-hot', 'Negrito quando quente'));
+        const colors = new Adw.PreferencesGroup({title: 'Colors'});
+        colors.add(colorRow(settings, 'color-normal', 'Normal', 'Empty = theme color'));
+        colors.add(colorRow(settings, 'color-warm', 'Warm', null));
+        colors.add(colorRow(settings, 'color-hot', 'Hot', null));
+        colors.add(switchRow(settings, 'bold-when-hot', 'Bold when hot'));
         page.add(colors);
         return page;
     }
 
     _sensorPage(settings) {
-        const page = new Adw.PreferencesPage({title: 'Sensores', icon_name: 'utilities-system-monitor-symbolic'});
+        const page = new Adw.PreferencesPage({title: 'Sensors', icon_name: 'utilities-system-monitor-symbolic'});
         const sensors = listTemperatureSensors();
         const sensorOptions = sensors.map(s => [s.id, `${s.chip} / ${s.label}`]);
 
         const pick = new Adw.PreferencesGroup({
-            title: 'Fonte das leituras',
-            description: 'Automático escolhe o pacote da CPU (coretemp/k10temp) e a GPU dedicada.',
+            title: 'Reading sources',
+            description: 'Automatic picks the CPU package (coretemp/k10temp) and the discrete GPU.',
         });
-        pick.add(comboRow(settings, 'cpu-sensor', 'Sensor da CPU',
-            [['', 'Automático'], ...sensorOptions]));
-        pick.add(comboRow(settings, 'gpu-sensor', 'Sensor da GPU',
-            [['', 'Automático'], [NVIDIA_SMI_ID, 'NVIDIA (nvidia-smi)'], ...sensorOptions]));
+        pick.add(comboRow(settings, 'cpu-sensor', 'CPU sensor',
+            [['', 'Automatic'], ...sensorOptions]));
+        pick.add(comboRow(settings, 'gpu-sensor', 'GPU sensor',
+            [['', 'Automatic'], [NVIDIA_SMI_ID, 'NVIDIA (nvidia-smi)'], ...sensorOptions]));
         page.add(pick);
 
         const nvidia = new Adw.PreferencesGroup({
             title: 'GPU NVIDIA',
-            description: 'Cada leitura do nvidia-smi liga a placa se ela estiver em repouso. ' +
-                'Com a opção abaixo desligada, o painel mostra "off" e deixa ela dormir.',
+            description: 'Every nvidia-smi reading powers the card up if it is asleep. ' +
+                'With the option below off, the panel shows "off" and lets it sleep.',
         });
-        nvidia.add(switchRow(settings, 'allow-wake-dgpu', 'Acordar a GPU para ler a temperatura',
-            'Gasta bateria: a placa nunca desliga'));
-        nvidia.add(spinRow(settings, 'gpu-min-interval', 'Intervalo mínimo entre leituras (s)',
-            'Maior que o tempo de repouso da placa, para não mantê-la acordada', 2, 120));
+        nvidia.add(switchRow(settings, 'allow-wake-dgpu', 'Wake the GPU to read its temperature',
+            'Drains the battery: the card never powers off'));
+        nvidia.add(spinRow(settings, 'gpu-min-interval', 'Minimum interval between readings (s)',
+            'Longer than the card\'s sleep delay, so it is not kept awake', 2, 120));
         page.add(nvidia);
 
-        const diag = new Adw.PreferencesGroup({title: 'Diagnóstico'});
+        const diag = new Adw.PreferencesGroup({title: 'Diagnostics'});
         const state = readProfileState(sysfs);
-        diag.add(infoRow('Perfil de energia', state.available
+        diag.add(infoRow('Power profile', state.available
             ? `${state.current} (driver: ${state.driver ?? 'acpi'})`
-            : 'indisponível — o acer_wmi está carregado?'));
-        diag.add(infoRow('Perfis do firmware', state.choices.join(', ') || '—'));
-        diag.add(infoRow('Troca de perfil pelo menu', writableProfilePath(sysfs)
-            ? 'direta (todos os perfis)'
-            : 'via power-profiles-daemon (3 perfis)'));
-        diag.add(infoRow('Sensores de temperatura', `${sensors.length} encontrados`));
+            : 'unavailable — is acer_wmi loaded?'));
+        diag.add(infoRow('Firmware profiles', state.choices.join(', ') || '—'));
+        diag.add(infoRow('Profile switching from the menu', writableProfilePath(sysfs)
+            ? 'direct (all profiles)'
+            : 'via power-profiles-daemon (3 profiles)'));
+        diag.add(infoRow('Temperature sensors', `${sensors.length} found`));
         page.add(diag);
         return page;
     }
@@ -141,7 +141,7 @@ function spinRow(settings, key, title, subtitle, min, max) {
 function comboRow(settings, key, title, options) {
     const current = settings.get_string(key);
     if (!options.some(([value]) => value === current))
-        options = [...options, [current, `${current} (não encontrado)`]];
+        options = [...options, [current, `${current} (not found)`]];
     const row = new Adw.ComboRow({
         title,
         model: Gtk.StringList.new(options.map(([, label]) => label)),
@@ -173,7 +173,7 @@ function colorRow(settings, key, title, subtitle) {
 
     const reset = new Gtk.Button({
         icon_name: 'edit-clear-symbolic',
-        tooltip_text: 'Restaurar o padrão',
+        tooltip_text: 'Restore default',
         valign: Gtk.Align.CENTER,
         css_classes: ['flat'],
     });
