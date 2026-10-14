@@ -298,17 +298,17 @@ MemoryDenyWriteExecute=yes
 SystemCallArchitectures=native
 SystemCallFilter=@system-service
 SystemCallFilter=~@privileged @resources
+SystemCallErrorNumber=EPERM
 UMask=0077
 ```
 
 `systemd-analyze security --offline=true data/heliosd.service` rates this unit
 **0.9 SAFE**. Unit tests (`crates/heliosd/src/service.rs`) fail if the unit gains
-a capability, a writable path or a device beyond the ones below. Still to
-confirm on the real machine, after installing, with a real `SetProfile` and a
-GPU reading (`journalctl -u heliosd` shows any denial):
+a capability, a writable path or a device beyond the ones below. Checked on
+the PHN16-72 after installing:
 
 - `ReadWritePaths` re-opens a path under the read-only `/sys` that
-  `ProtectKernelTunables` creates. The class device path is resolved, not the
+  `ProtectKernelTunables` creates (verified: `SetProfile` from the panel works). The class device path is resolved, not the
   `/sys/class/platform-profile/platform-profile-N` symlink: on the PHN16-72 it is
   `/sys/devices/platform/acer-wmi/platform-profile/platform-profile-0`. Other
   drivers get their own resolved path in the unit (the `-` prefix ignores
@@ -317,8 +317,11 @@ GPU reading (`journalctl -u heliosd` shows any denial):
   access beyond what any logged-in user has, and it runs `nvidia-smi` with a
   fixed argv and a 4 s timeout.
 - `MemoryDenyWriteExecute=yes` and `SystemCallFilter=~@privileged @resources`
-  also apply to the `nvidia-smi` child. If the NVIDIA libraries need either,
-  the fix is to relax that one line and document why, never to drop the sandbox.
+  also apply to the `nvidia-smi` child. Run as root, nvidia-smi calls `chown()`
+  once (syscall 92, in `@privileged`). With the default action the kernel killed
+  it with SIGSYS and Ubuntu showed a crash dialog; `SystemCallErrorNumber=EPERM`
+  makes the call fail instead, which nvidia-smi handles, and readings work. The
+  call stays blocked: root without capabilities could not chown anyway.
 - `ProtectKernelModules=yes` also guarantees the daemon itself can never load
   or unload a module.
 
