@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 // Live sensor readers built on the pure discovery logic in core/hwmon.js.
 
 import {

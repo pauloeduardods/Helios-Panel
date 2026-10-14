@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 // Platform-profile names as the Linux kernel exposes them, and how they map to
 // what PredatorSense calls them on Acer Predator laptops (acer-wmi with
 // predator_v4=1). Pure module: no GNOME imports.

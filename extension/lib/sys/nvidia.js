@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 // NVIDIA temperature without defeating runtime power management.
 //
 // The proprietary driver does not export hwmon temperatures, so the only

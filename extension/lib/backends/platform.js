@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 // Platform (thermal/power) profile backend.
 //
 // Reading is always unprivileged. Changing it works two ways, best first:

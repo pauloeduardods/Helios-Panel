@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 // GLib implementation of the filesystem adapter the pure core modules expect.
 // sysfs files are tiny and served from memory, so synchronous reads are fine
 // even inside gnome-shell; anything slow (processes, D-Bus) is async elsewhere.

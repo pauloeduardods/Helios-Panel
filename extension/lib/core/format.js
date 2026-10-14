@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 // Pure helpers: no GNOME imports, so they can be unit-tested with node.
 
 export const Level = Object.freeze({

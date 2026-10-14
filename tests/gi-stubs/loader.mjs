@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 // Node module hooks: maps gi://GLib and gi://Gio to tiny fakes so the
 // GLib-based sysfs/nvidia code can be exercised against a fake /sys tree.
 export async function resolve(specifier, context, next) {

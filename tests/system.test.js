@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 // Exercises the GLib-side code (sysfs adapter, NVIDIA power gating, sensors,
 // profile writes) against a fake /sys tree. Run via: npm test
 import {test, beforeEach} from 'node:test';

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-3.0-or-later
 # Installs (or updates) the extension for the current user. No root needed.
 set -euo pipefail
 
