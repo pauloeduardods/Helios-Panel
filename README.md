@@ -36,7 +36,10 @@ Details are in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 That one command builds heliosd and heliosctl, installs the extension for your user and the system service (it asks for your password once, for `sudo`), and enables the extension. Run it again to upgrade.
 
-On Wayland, GNOME only picks up a new extension version after you **log out and back in** (on X11: Alt+F2, `r`, Enter). heliosd itself starts on demand.
+GNOME Shell keeps the extension code it loaded at login, so a new version only shows up after the shell reloads. heliosd itself starts on demand.
+
+- **X11:** press **Alt+F2**, type `r` and press Enter. Only gnome-shell restarts; your windows, terminals and running programs stay open. No logout needed.
+- **Wayland:** log out and back in (the shell cannot restart in place).
 
 To configure it, open the extension menu → **Settings**, or run `gnome-extensions prefs helios-panel@paulo`.
 
@@ -104,6 +107,9 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all --check
 npm test          # extension tests (node, fake D-Bus, no GNOME needed)
 npm run check     # syntax check of every module
+
+# reload the extension after ./install.sh: on X11, Alt+F2, r, Enter (no logout);
+# re-enabling alone keeps the old code, because GNOME caches loaded modules.
 
 # test in a nested session, without leaving your own session:
 dbus-run-session gnome-shell --devkit            # GNOME 49+
