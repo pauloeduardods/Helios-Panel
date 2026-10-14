@@ -422,7 +422,7 @@ that uninstall leaves the tree byte-for-byte as it was.
 | 4 | heliosd (sensors, profile, `SetProfile`, polkit), data files, extension becomes a D-Bus client, `lib/core`/`lib/sys`/udev rule removed (done) |
 | 5 | `heliosctl doctor` (done) |
 | 6 | `install.sh` for extension + daemon, manifest-based `--uninstall` (done, before task 5) |
-| 7 | lighting research and API proposal (plan only) |
+| 7 | lighting research and API proposal (plan only): [LIGHTING.md](LIGHTING.md) |
 
 ## Decisions
 
