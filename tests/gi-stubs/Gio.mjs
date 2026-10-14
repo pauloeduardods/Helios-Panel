@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 import fs from 'node:fs';
 const map = p => (globalThis.FAKE_SYS_ROOT ?? '') + p;
 const Gio = {

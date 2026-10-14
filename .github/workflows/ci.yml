@@ -39,6 +39,12 @@ jobs:
 
       # Rust workspace (helios-core, heliosd, heliosctl): these steps start
       # running as soon as a Cargo.toml lands at the repository root.
+      - name: cargo fmt
+        if: hashFiles('Cargo.toml') != ''
+        run: |
+          rustup component add rustfmt
+          cargo fmt --all --check
+
       - name: cargo test
         if: hashFiles('Cargo.toml') != ''
         run: cargo test --workspace --locked

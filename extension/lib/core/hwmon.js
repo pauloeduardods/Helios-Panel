@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 // Sensor discovery over /sys/class/hwmon. Pure: every filesystem access goes
 // through an injected adapter `fs` = {readText(path), listDir(path)} so it can
 // be tested against a fake tree in node and run against GLib in the shell.

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 // The top-bar button: compact readings in the panel, details and the profile
 // switcher in its menu. All hardware access goes through lib/sys and
 // lib/backends; this file only renders.

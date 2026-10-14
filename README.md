@@ -55,10 +55,26 @@ That means it is powered off to save battery (on-demand mode). Reading the tempe
 
 The keyboard mode key keeps working in both cases.
 
-## Development
+## Command line
+
+The Rust CLI reads the same sensors without the extension, root or a daemon:
 
 ```bash
-npm test          # logic tests (node, no GNOME needed)
+cargo run -p heliosctl -- status          # human-readable
+cargo run -p heliosctl -- status --json   # machine-readable
+```
+
+An NVIDIA GPU that is asleep is reported as `off` and never woken.
+
+## Development
+
+The repository is moving to a Rust backend (daemon + CLI) with the extension as a thin client; see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
+```bash
+cargo test --workspace                                    # Rust tests (fake sysfs, never the real one)
+cargo clippy --workspace --all-targets -- -D warnings
+cargo fmt --all --check
+npm test          # extension logic tests (node, no GNOME needed)
 npm run check     # syntax check of every module
 
 # test in a nested session, without leaving your own session:
@@ -70,5 +86,7 @@ journalctl -f -o cat /usr/bin/gnome-shell | grep -i helios
 ```
 
 The code layout and the plan for adding lighting control are in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
+Helios Panel is licensed under the [GNU GPL v3.0 or later](LICENSE).
 
 Commits and pull request titles follow [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/); see [CONTRIBUTING.md](CONTRIBUTING.md).

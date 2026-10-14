@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 // Reading the ACPI platform profile and deciding how it can be changed.
 // Pure: filesystem access goes through the injected adapter
 // `fs` = {readText(path), listDir(path), exists(path), isWritable(path)}.

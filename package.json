@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "description": "GNOME Shell extension: CPU/GPU temperature and platform profile in the top bar",
+  "license": "GPL-3.0-or-later",
   "scripts": {
     "test": "node --test tests/core.test.js && node --import ./tests/gi-stubs/register.mjs --test tests/system.test.js",
     "check": "for f in $(find extension -name '*.js'); do node --check \"$f\" || exit 1; done && echo syntax ok"

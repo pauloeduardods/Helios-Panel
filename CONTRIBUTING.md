@@ -42,5 +42,5 @@ ci: run npm test and npm run check on every pull request
 
 - `main` is protected: every change goes on its own branch and lands through a pull request, with linear history.
 - The pull request title follows the same Conventional Commits format, since it becomes the commit on `main`.
-- `npm test` and `npm run check` (and, once the Rust workspace exists, `cargo test` and `cargo clippy -- -D warnings`) must pass.
+- `npm test`, `npm run check`, `cargo test --workspace`, `cargo clippy --workspace --all-targets -- -D warnings` and `cargo fmt --all --check` must pass.
 - GitHub Actions ([.github/workflows/ci.yml](.github/workflows/ci.yml)) runs all of them on every pull request; its `checks` job is a required status check, so a pull request cannot be merged while it fails.

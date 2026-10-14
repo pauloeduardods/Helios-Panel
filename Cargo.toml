@@ -1,0 +1,22 @@
+[workspace]
+resolver = "3"
+members = ["crates/helios-core", "crates/helios-sys", "crates/heliosctl"]
+
+[workspace.package]
+version = "0.2.0"
+edition = "2024"
+rust-version = "1.85"
+license = "GPL-3.0-or-later"
+repository = "https://github.com/pauloeduardods/Helios-Panel"
+
+[workspace.dependencies]
+helios-core = { path = "crates/helios-core" }
+helios-sys = { path = "crates/helios-sys" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }

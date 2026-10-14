@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 // Lighting backends: the extension point for keyboard / lid-logo RGB.
 //
 // Nothing here talks to hardware yet. On the PHN16-72 the keyboard RGB goes
