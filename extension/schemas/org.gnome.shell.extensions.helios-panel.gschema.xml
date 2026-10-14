@@ -26,9 +26,6 @@
     </key>
     <key name="panel-index" type="i"><range min="0" max="20"/><default>0</default><summary>Order within the area</summary></key>
 
-    <!-- Refresh -->
-    <key name="refresh-interval" type="i"><range min="1" max="60"/><default>2</default><summary>Refresh interval (s)</summary></key>
-
     <!-- Thresholds (°C) -->
     <key name="cpu-warm" type="i"><range min="30" max="110"/><default>80</default><summary>CPU: warm from</summary></key>
     <key name="cpu-hot" type="i"><range min="30" max="110"/><default>92</default><summary>CPU: hot from</summary></key>
@@ -43,12 +40,6 @@
 
     <!-- Sensors -->
     <key name="cpu-sensor" type="s"><default>''</default><summary>CPU sensor ('' = automatic)</summary></key>
-    <key name="gpu-sensor" type="s"><default>''</default><summary>GPU sensor ('' = automatic, 'nvidia-smi', or hwmon:chip/label)</summary></key>
-    <key name="allow-wake-dgpu" type="b">
-      <default>false</default>
-      <summary>Allow waking the discrete GPU to read its temperature</summary>
-      <description>Off: while the NVIDIA GPU is asleep the panel shows "off" and does not wake it (saves battery).</description>
-    </key>
-    <key name="gpu-min-interval" type="i"><range min="2" max="120"/><default>10</default><summary>Minimum interval between NVIDIA readings (s)</summary></key>
+    <key name="gpu-sensor" type="s"><default>''</default><summary>GPU sensor ('' = automatic, or hwmon:chip/label)</summary></key>
   </schema>
 </schemalist>

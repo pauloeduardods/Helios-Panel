@@ -2,13 +2,13 @@
 import Adw from 'gi://Adw';
 import Gdk from 'gi://Gdk';
 import Gio from 'gi://Gio';
+import GLib from 'gi://GLib';
 import Gtk from 'gi://Gtk';
 
 import {ExtensionPreferences} from 'resource:///org/gnome/Shell/Extensions/js/extensions/prefs.js';
 
-import {listTemperatureSensors, NVIDIA_SMI_ID} from './lib/sys/sensors.js';
-import {readProfileState, writableProfilePath} from './lib/core/index.js';
-import {sysfs} from './lib/sys/sysfs.js';
+import {BUS_NAME, OBJECT_PATH} from './lib/client.js';
+import {profileFromDbus, sensorsFromDbus} from './lib/model.js';
 
 export default class HeliosPanelPreferences extends ExtensionPreferences {
     fillPreferencesWindow(window) {
@@ -45,12 +45,11 @@ export default class HeliosPanelPreferences extends ExtensionPreferences {
             'Blue for power saving, orange for Performance, red for Turbo'));
         page.add(profile);
 
-        const place = new Adw.PreferencesGroup({title: 'Position and refresh'});
+        const place = new Adw.PreferencesGroup({title: 'Position'});
         place.add(comboRow(settings, 'panel-position', 'Top bar area', [
             ['left', 'Left'], ['center', 'Center'], ['right', 'Right (next to Wi-Fi)'],
         ]));
         place.add(spinRow(settings, 'panel-index', 'Order within the area', '0 = leftmost', 0, 20));
-        place.add(spinRow(settings, 'refresh-interval', 'Refresh every (seconds)', null, 1, 60));
         page.add(place);
         return page;
     }
@@ -79,42 +78,58 @@ export default class HeliosPanelPreferences extends ExtensionPreferences {
 
     _sensorPage(settings) {
         const page = new Adw.PreferencesPage({title: 'Sensors', icon_name: 'utilities-system-monitor-symbolic'});
-        const sensors = listTemperatureSensors();
+        const daemon = readDaemon();
+        const sensors = daemon?.sensors.temperatures ?? [];
         const sensorOptions = sensors.map(s => [s.id, `${s.chip} / ${s.label}`]);
 
         const pick = new Adw.PreferencesGroup({
             title: 'Reading sources',
-            description: 'Automatic picks the CPU package (coretemp/k10temp) and the discrete GPU.',
+            description: 'Automatic uses what heliosd picks: the CPU package (coretemp/k10temp) ' +
+                'and the discrete GPU. An NVIDIA GPU that is asleep is never woken.',
         });
         pick.add(comboRow(settings, 'cpu-sensor', 'CPU sensor',
             [['', 'Automatic'], ...sensorOptions]));
         pick.add(comboRow(settings, 'gpu-sensor', 'GPU sensor',
-            [['', 'Automatic'], [NVIDIA_SMI_ID, 'NVIDIA (nvidia-smi)'], ...sensorOptions]));
+            [['', 'Automatic'], ...sensorOptions]));
         page.add(pick);
 
-        const nvidia = new Adw.PreferencesGroup({
-            title: 'GPU NVIDIA',
-            description: 'Every nvidia-smi reading powers the card up if it is asleep. ' +
-                'With the option below off, the panel shows "off" and lets it sleep.',
-        });
-        nvidia.add(switchRow(settings, 'allow-wake-dgpu', 'Wake the GPU to read its temperature',
-            'Drains the battery: the card never powers off'));
-        nvidia.add(spinRow(settings, 'gpu-min-interval', 'Minimum interval between readings (s)',
-            'Longer than the card\'s sleep delay, so it is not kept awake', 2, 120));
-        page.add(nvidia);
-
         const diag = new Adw.PreferencesGroup({title: 'Diagnostics'});
-        const state = readProfileState(sysfs);
-        diag.add(infoRow('Power profile', state.available
-            ? `${state.current} (driver: ${state.driver ?? 'acpi'})`
-            : 'unavailable — is acer_wmi loaded?'));
-        diag.add(infoRow('Firmware profiles', state.choices.join(', ') || '—'));
-        diag.add(infoRow('Profile switching from the menu', writableProfilePath(sysfs)
-            ? 'direct (all profiles)'
-            : 'via power-profiles-daemon (3 profiles)'));
-        diag.add(infoRow('Temperature sensors', `${sensors.length} found`));
+        if (!daemon) {
+            diag.add(infoRow('heliosd', 'not running — check it with: systemctl status heliosd'));
+        } else {
+            const {profile} = daemon;
+            diag.add(infoRow('heliosd', `running, version ${daemon.version ?? '?'}`));
+            diag.add(infoRow('Power profile', profile.available
+                ? `${profile.current} (driver: ${profile.driver ?? 'acpi'})`
+                : 'unavailable — run: heliosctl status'));
+            diag.add(infoRow('Firmware profiles', profile.choices.join(', ') || '—'));
+            diag.add(infoRow('GPU', daemon.sensors.gpu.source
+                ? `${daemon.sensors.gpu.source} (${daemon.sensors.gpu.state})`
+                : 'no sensor found'));
+            diag.add(infoRow('Temperature sensors', `${sensors.length} found`));
+        }
         page.add(diag);
         return page;
+    }
+}
+
+/** One synchronous read of everything heliosd publishes, or null. */
+function readDaemon() {
+    try {
+        const bus = Gio.bus_get_sync(Gio.BusType.SYSTEM, null);
+        const getAll = iface => bus.call_sync(
+            BUS_NAME, OBJECT_PATH, 'org.freedesktop.DBus.Properties', 'GetAll',
+            new GLib.Variant('(s)', [`io.github.pauloeduardods.Helios1.${iface}`]),
+            new GLib.VariantType('(a{sv})'), Gio.DBusCallFlags.NONE, 3000, null,
+        ).recursiveUnpack()[0];
+        return {
+            version: getAll('Daemon').Version ?? null,
+            sensors: sensorsFromDbus(getAll('Sensors')),
+            profile: profileFromDbus(getAll('Profile')),
+        };
+    } catch (e) {
+        console.warn(`[helios-panel] heliosd unavailable: ${e.message}`);
+        return null;
     }
 }
 

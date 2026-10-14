@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!DOCTYPE policyconfig PUBLIC "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
+ "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
+<policyconfig>
+  <vendor>Helios Panel</vendor>
+  <vendor_url>https://github.com/pauloeduardods/Helios-Panel</vendor_url>
+
+  <!-- Same power as the keyboard mode key: the worst case is a loud fan. -->
+  <action id="io.github.pauloeduardods.helios.set-profile">
+    <description>Change the platform (power) profile</description>
+    <message>Authentication is required to change the platform profile</message>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>yes</allow_active>
+    </defaults>
+  </action>
+</policyconfig>

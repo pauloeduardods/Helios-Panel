@@ -15,6 +15,7 @@ use serde_json::Value;
 const GPU_STATUS: &str = "sys/bus/pci/devices/0000:01:00.0/power/runtime_status";
 
 struct Fixture {
+    base: PathBuf,
     root: PathBuf,
     smi: PathBuf,
     smi_log: PathBuf,
@@ -43,7 +44,12 @@ impl Fixture {
         )
         .unwrap();
         fs::set_permissions(&smi, fs::Permissions::from_mode(0o755)).unwrap();
-        Self { root, smi, smi_log }
+        Self {
+            base,
+            root,
+            smi,
+            smi_log,
+        }
     }
 
     fn set(&self, path: &str, value: &str) {
@@ -89,6 +95,12 @@ impl Fixture {
         let mut out = BTreeMap::new();
         walk(&self.root, &mut out);
         out
+    }
+}
+
+impl Drop for Fixture {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.base);
     }
 }
 

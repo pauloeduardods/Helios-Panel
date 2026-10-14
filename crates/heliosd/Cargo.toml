@@ -1,0 +1,24 @@
+[package]
+name = "heliosd"
+description = "Helios system daemon: sensors and platform profile over D-Bus, writes behind polkit"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+async-io = "2.6.0"
+async-lock = "3.4.2"
+blocking = "1.7.0"
+helios-core.workspace = true
+helios-sys.workspace = true
+zbus = { version = "5", default-features = false, features = ["async-io"] }
+
+[dev-dependencies]
+async-io = "2.6.0"
+futures-lite = "2.6.1"
+helios-core = { workspace = true, features = ["fake"] }
+
+[lints]
+workspace = true

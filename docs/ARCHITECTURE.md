@@ -1,10 +1,8 @@
 # Architecture
 
-> **Status: plan.** This document describes the target design: a Rust system
-> daemon plus CLI, with the GNOME extension as a thin D-Bus client. Today the
-> repository still contains only the GJS extension (see
-> [Current state](#current-state-gjs-only)). The [migration plan](#migration-plan)
-> maps each part of this design to a task.
+> **Status:** helios-core, heliosctl, heliosd and the D-Bus extension are
+> implemented. `heliosctl doctor`, the full installer and lighting are still
+> planned (see the [migration plan](#migration-plan)).
 
 ## Goals and scope
 
@@ -184,7 +182,7 @@ All properties are read-only and emit `org.freedesktop.DBus.Properties.Propertie
 | `Cpu` | `(sbd)` | (sensor id, valid, °C), auto-selected CPU package sensor |
 | `Gpu` | `(ssbd)` | (source id, state `on`/`off`/`none`, valid, °C) |
 | `Fans` | `a(si)` | (label, rpm; `-1` = unreadable) |
-| `Temperatures` | `a(sssd)` | every hwmon temperature: (id, chip, label, °C), for clients that let the user pick a sensor |
+| `Temperatures` | `a(sssd)` | every readable hwmon temperature: (id, chip, label, °C), for clients that let the user pick a sensor; unreadable sensors are left out |
 
 The `valid` flag replaces NaN sentinels, so every frontend, including JSON-based
 ones, gets an explicit "no value".
@@ -232,7 +230,7 @@ The interface is only exported when a supported lighting device exists.
 | Action | `allow_any` | `allow_inactive` | `allow_active` | Why |
 |---|---|---|---|---|
 | `io.github.pauloeduardods.helios.set-profile` | `no` | `no` | `yes` | the mode key already does it without a password; worst case is a loud fan |
-| `io.github.pauloeduardods.helios.set-lighting` | `no` | `no` | `yes` | worst case is a wrong color |
+| `io.github.pauloeduardods.helios.set-lighting` (task 7, not shipped yet) | `no` | `no` | `yes` | worst case is a wrong color |
 
 heliosd calls `CheckAuthorization` with the caller as a `system-bus-name`
 subject and `AllowUserInteraction`, so an administrator can tighten either
@@ -242,8 +240,8 @@ change. Reads need no authorization.
 ### D-Bus policy
 
 Only root may own `io.github.pauloeduardods.Helios1`. Anyone may call the
-`Daemon`, `Sensors`, `Profile` and `Lighting` interfaces and the standard
-ones. polkit, not the bus policy, decides on writes. Everything else is
+`Daemon`, `Sensors` and `Profile` interfaces (task 7 adds `Lighting`) and the
+standard ones. polkit, not the bus policy, decides on writes. Everything else is
 denied.
 
 ## systemd service and sandboxing
@@ -303,8 +301,11 @@ SystemCallFilter=~@privileged @resources
 UMask=0077
 ```
 
-Notes to verify in task 4, with `systemd-analyze security heliosd` and a real
-`SetProfile`:
+`systemd-analyze security --offline=true data/heliosd.service` rates this unit
+**0.9 SAFE**. Unit tests (`crates/heliosd/src/service.rs`) fail if the unit gains
+a capability, a writable path or a device beyond the ones below. Still to
+confirm on the real machine, after installing, with a real `SetProfile` and a
+GPU reading (`journalctl -u heliosd` shows any denial):
 
 - `ReadWritePaths` re-opens a path under the read-only `/sys` that
   `ProtectKernelTunables` creates. The class device path is resolved, not the
@@ -324,10 +325,11 @@ Notes to verify in task 4, with `systemd-analyze security heliosd` and a real
 ## How the extension consumes the API
 
 ```
-extension.js     lifecycle (unchanged)
+extension.js     lifecycle
+prefs.js         settings; reads heliosd once (sensor list, diagnostics)
 lib/
 ├── client.js    HeliosClient: Gio.bus_watch_name + Gio.DBusProxy on the system bus
-├── format.js    temperature levels, labels, colors (pure, tested in node)
+├── model.js     D-Bus values → view, temperature levels, labels, colors (pure)
 └── ui/indicator.js
 ```
 
@@ -336,10 +338,10 @@ lib/
   - **running**: a `Gio.DBusProxy` caches the properties. The indicator
     re-renders on `g-properties-changed`. It has no timers, no sysfs and no
     subprocesses.
-  - **daemon not running**: the name has no owner and activation failed. The
-    panel shows one dimmed segment (`helios off`). The menu shows "heliosd is not
-    running" and the command to check it (`systemctl status heliosd`) or to
-    install it (`./install.sh`). Profile items are hidden. When the name appears,
+  - **daemon not running**: the name has no owner and activation failed, or
+    the proxies could not be created. The panel shows one dimmed segment
+    (`helios off`). The menu shows "heliosd is not running" and the command to
+    check it (`systemctl status heliosd`). Profile items are hidden. When the name appears,
     the client recreates the proxy and the indicator goes back to normal, with
     no reload needed.
 - `SetProfile` is called asynchronously with a long timeout, because polkit may
@@ -350,9 +352,10 @@ lib/
   `Temperatures`).
 - The settings that go away, because the daemon now owns them:
   `allow-wake-dgpu`, `gpu-min-interval`, `refresh-interval`.
-- `lib/core`, `lib/sys`, `lib/backends/platform.js`, the power-profiles-daemon
-  path and `extras/99-helios-platform-profile.rules` are deleted. The udev
-  rule only existed to let the extension write the profile itself.
+- `lib/core`, `lib/sys`, `lib/backends`, the power-profiles-daemon path and
+  `extras/99-helios-platform-profile.rules` were deleted in task 4. The udev
+  rule only existed to let the extension write the profile itself. Their logic
+  and tests live on in helios-core.
 
 ## Test strategy
 
@@ -363,7 +366,7 @@ Every rule in this section is enforced in CI (`checks` job).
 | helios-core | `cargo test`, in-memory `FakeFs` built from fixtures: **PHN16-72** (coretemp, acer fans, NVIDIA 0000:01:00.0, acer-wmi profile) and **AMD desktop** (k10temp Tctl, iGPU + dGPU amdgpu) | discovery, ordering, sensor ids, profile parsing |
 | NVIDIA gate | `FakeFs` + counting `GpuQuery` + manual `Clock` (ported from `tests/system.test.js`) | a `suspended`/`suspending`/`resuming` GPU is **never** queried; an active one is queried, then rate-limited; EIO autosuspend delay falls back to 10 s |
 | profile writes | `FakeFs` with a write log | a value in `choices` is written to the right path and read back; values not in `choices`, empty, whitespace, newline-injected or over-long strings are rejected with **no write** |
-| heliosd | `dbus-run-session -- cargo test -p heliosd --test bus`: daemon on a private bus, `--sysfs-root` temp tree, fake `nvidia-smi` script that counts calls, fake polkit service on the same bus that answers allow/deny | properties match the tree; `PropertiesChanged` on change; `SetProfile` accepts only `Choices`; polkit denial → `NotAuthorized` and the file is byte-for-byte unchanged; suspended GPU → fake `nvidia-smi` never ran |
+| heliosd | `cargo test -p heliosd --test bus`: each test starts its own `dbus-daemon` with a private config and runs the daemon there, `--sysfs-root` temp tree, fake `nvidia-smi` script that counts calls, fake polkit service on the same bus that answers allow/deny | properties match the tree; `PropertiesChanged` on change; `SetProfile` accepts only `Choices`; invalid values never reach polkit; polkit denial or a missing polkit → `NotAuthorized` and the tree is byte-for-byte unchanged; suspended GPU → fake `nvidia-smi` never ran; external profile changes are published |
 | heliosctl | run the binary against fixture trees | `status --json` matches the schema; `doctor` writes nothing (tree hashed before/after) |
 | extension | `npm test` with gi stubs, including a fake `Gio.DBusProxy` and `bus_watch_name` | rendering from properties; **daemon not running** state; recovery when the name appears; errors from `SetProfile` |
 | lint | `cargo clippy --workspace --all-targets -- -D warnings`, `npm run check` | |
@@ -401,21 +404,12 @@ file, `license = "GPL-3.0-or-later"` in every crate, SPDX headers).
 created in a manifest, and `--uninstall` removes exactly those. It never
 touches modprobe, kernel parameters, initramfs or modules.
 
-## Current state (GJS only)
-
-Until task 4, the extension reads sysfs itself through `lib/core` (pure, tested
-with a fake fs) and `lib/sys` (GLib), runs `nvidia-smi` from gnome-shell with
-the same power gate, and switches profiles through power-profiles-daemon or a
-udev-granted direct write. helios-core is a port of `lib/core` + the gating in
-`lib/sys/nvidia.js`, and its tests are a port of `tests/core.test.js` and
-`tests/system.test.js`.
-
 ## Migration plan
 
 | Task | Delivers |
 |---|---|
-| 3 | workspace, helios-core, `heliosctl status [--json]`, ported tests; CI starts running cargo |
-| 4 | heliosd (sensors, profile, `SetProfile`, polkit), data files, extension becomes a D-Bus client, `lib/core`/`lib/sys`/udev rule removed |
+| 3 | workspace, helios-core, `heliosctl status [--json]`, ported tests; CI starts running cargo (done) |
+| 4 | heliosd (sensors, profile, `SetProfile`, polkit), data files, extension becomes a D-Bus client, `lib/core`/`lib/sys`/udev rule removed (done) |
 | 5 | `heliosctl doctor` |
 | 6 | `install.sh` for extension + daemon, manifest-based `--uninstall` |
 | 7 | lighting research and API proposal (plan only) |
