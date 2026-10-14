@@ -9,12 +9,12 @@ DEST="${XDG_DATA_HOME:-$HOME/.local/share}/gnome-shell/extensions/$UUID"
 if [[ "${1:-}" == "--uninstall" ]]; then
     gnome-extensions disable "$UUID" 2>/dev/null || true
     rm -rf "$DEST"
-    echo "Removida. Faça logout/login para sair da memória do GNOME Shell."
+    echo "Removed. Log out and back in to unload it from GNOME Shell."
     exit 0
 fi
 
 command -v glib-compile-schemas >/dev/null || {
-    echo "Falta o glib-compile-schemas: sudo apt install libglib2.0-bin" >&2
+    echo "glib-compile-schemas is missing: sudo apt install libglib2.0-bin" >&2
     exit 1
 }
 
@@ -22,10 +22,10 @@ rm -rf "$DEST"
 mkdir -p "$DEST"
 cp -r "$SRC/." "$DEST/"
 glib-compile-schemas "$DEST/schemas"
-echo "Instalada em $DEST"
+echo "Installed to $DEST"
 
 if gnome-extensions enable "$UUID" 2>/dev/null; then
-    echo "Ativada. Se não aparecer na barra, faça logout/login (Wayland)."
+    echo "Enabled. If it does not show up in the top bar, log out and back in (Wayland)."
 else
-    echo "Faça logout/login e depois rode: gnome-extensions enable $UUID"
+    echo "Log out and back in, then run: gnome-extensions enable $UUID"
 fi

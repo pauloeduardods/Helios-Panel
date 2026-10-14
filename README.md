@@ -1,72 +1,74 @@
 # Helios Panel
 
-Extensão do GNOME Shell que mostra na barra superior, ao lado do Wi-Fi e do idioma do teclado:
+A GNOME Shell extension that shows, in the top bar next to Wi-Fi and the keyboard layout:
 
-- a temperatura da **CPU** e da **GPU**, mudando de cor quando esquenta;
-- o **perfil de energia** atual (Eco, Quiet, Balanced, Performance, Turbo);
-- opcionalmente, a rotação das **ventoinhas**.
+- the **CPU** and **GPU** temperature, changing color as they heat up;
+- the current **power profile** (Eco, Quiet, Balanced, Performance, Turbo);
+- optionally, the **fan** speed.
 
-O menu mostra os detalhes e permite trocar de perfil. Foi feita para o Acer Predator Helios Neo 16 (PHN16-72), mas funciona em qualquer PC com sensores no `/sys/class/hwmon`, inclusive com CPU Ryzen e GPU Radeon.
+The menu shows the details and lets you switch profiles. It was built for the Acer Predator Helios Neo 16 (PHN16-72), but it works on any PC with sensors in `/sys/class/hwmon`, including Ryzen CPUs and Radeon GPUs.
 
 ```
- [▣ 61°] [▤ off] [◔ Balanced]   ← painel
+ [▣ 61°] [▤ off] [◔ Balanced]   ← panel
 ```
 
-## Requisitos
+## Requirements
 
-- GNOME Shell 46 a 50 (Ubuntu 24.04 ou mais novo).
-- Para o perfil de energia: o driver `acer_wmi` carregado com `predator_v4=1`.
-- Para a temperatura da NVIDIA: o driver proprietário (que traz o `nvidia-smi`).
+- GNOME Shell 46 to 50 (Ubuntu 24.04 or newer).
+- For the power profile: the `acer_wmi` driver loaded with `predator_v4=1`.
+- For the NVIDIA temperature: the proprietary driver (which ships `nvidia-smi`).
 
-## Instalar
+## Install
 
 ```bash
 ./install.sh
 ```
 
-No Wayland, o GNOME só carrega extensões novas depois de **sair e entrar de novo na sessão**. Depois disso:
+On Wayland, GNOME only loads new extensions after you **log out and back in**. Then:
 
 ```bash
 gnome-extensions enable helios-panel@paulo
 ```
 
-Para configurar, abra o menu da extensão → **Configurações**, ou rode `gnome-extensions prefs helios-panel@paulo`.
+To configure it, open the extension menu → **Settings**, or run `gnome-extensions prefs helios-panel@paulo`.
 
-Para remover: `./install.sh --uninstall`.
+To remove it: `./install.sh --uninstall`.
 
-## Como cada coisa é lida
+## Where each reading comes from
 
-| Item | Fonte | Precisa de root? |
+| Item | Source | Needs root? |
 |---|---|---|
-| CPU | `coretemp` "Package id 0" (Intel) ou `k10temp` "Tctl" (AMD) | não |
-| GPU NVIDIA | `nvidia-smi`, **só se a placa já estiver ligada** | não |
-| GPU AMD | hwmon `amdgpu` (prefere a dedicada) | não |
-| Ventoinhas | hwmon `acer` (do `acer_wmi`) | não |
-| Perfil | `/sys/firmware/acpi/platform_profile` | não para ler |
+| CPU | `coretemp` "Package id 0" (Intel) or `k10temp` "Tctl" (AMD) | no |
+| NVIDIA GPU | `nvidia-smi`, **only if the card is already powered on** | no |
+| AMD GPU | `amdgpu` hwmon (prefers the discrete one) | no |
+| Fans | `acer` hwmon (from `acer_wmi`) | no |
+| Profile | `/sys/firmware/acpi/platform_profile` | not to read |
 
-### A GPU NVIDIA aparece "off"
+### The NVIDIA GPU shows "off"
 
-Isso quer dizer que ela está desligada, economizando bateria (modo on-demand). Ler a temperatura com o `nvidia-smi` acordaria a placa, então a extensão não faz isso. Além disso, ela espaça as leituras para não impedir a placa de voltar a dormir. Se quiser a temperatura sempre, ative **Sensores → Acordar a GPU**, sabendo que isso gasta bateria.
+That means it is powered off to save battery (on-demand mode). Reading the temperature with `nvidia-smi` would wake the card, so the extension does not do it. It also spaces out its readings so it does not keep the card from going back to sleep. If you always want the temperature, enable **Sensors → Wake the GPU**, knowing that it drains the battery.
 
-## Trocar de perfil pelo menu
+## Switching profiles from the menu
 
-- **Sem configurar nada**, a troca passa pelo `power-profiles-daemon`, o mesmo do "Modo de energia" do Ubuntu. Ele só conhece 3 modos: Economia, Equilibrado e Desempenho (que vira o Turbo).
-- **Para ter todos os perfis do firmware no menu**, instale a regra udev opcional em `extras/99-helios-platform-profile.rules`. As instruções e o risco estão no próprio arquivo.
+- **With no extra setup**, switching goes through `power-profiles-daemon`, the same service behind Ubuntu's "Power Mode". It only knows 3 modes: Power Saver, Balanced and Performance (which maps to Turbo).
+- **To get every firmware profile in the menu**, install the optional udev rule in `extras/99-helios-platform-profile.rules`. The instructions and the risk are described in the file itself.
 
-A tecla de modo do teclado continua funcionando nos dois casos.
+The keyboard mode key keeps working in both cases.
 
-## Desenvolvimento
+## Development
 
 ```bash
-npm test          # testes da lógica (node, sem GNOME)
-npm run check     # checagem de sintaxe de todos os módulos
+npm test          # logic tests (node, no GNOME needed)
+npm run check     # syntax check of every module
 
-# testar numa sessão aninhada, sem precisar sair da sua sessão:
-dbus-run-session gnome-shell --devkit         # GNOME 49+
+# test in a nested session, without leaving your own session:
+dbus-run-session gnome-shell --devkit            # GNOME 49+
 dbus-run-session gnome-shell --nested --wayland  # GNOME 46-48
 
-# erros da extensão:
+# extension errors:
 journalctl -f -o cat /usr/bin/gnome-shell | grep -i helios
 ```
 
-A organização do código e o plano para adicionar o controle de iluminação estão em [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+The code layout and the plan for adding lighting control are in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
+Commits and pull request titles follow [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/); see [CONTRIBUTING.md](CONTRIBUTING.md).

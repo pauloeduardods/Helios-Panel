@@ -62,9 +62,9 @@ export function sortChoices(choices) {
 export const PPD_PROFILES = Object.freeze(['power-saver', 'balanced', 'performance']);
 
 export const PPD_LABELS = Object.freeze({
-    'power-saver': 'Economia de energia',
-    'balanced': 'Equilibrado',
-    'performance': 'Desempenho',
+    'power-saver': 'Power Saver',
+    'balanced': 'Balanced',
+    'performance': 'Performance',
 });
 
 /** Which PPD profile a platform profile belongs to (for the menu check mark). */

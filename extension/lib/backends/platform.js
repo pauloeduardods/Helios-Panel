@@ -49,19 +49,19 @@ export class PlatformProfileBackend {
     setPlatformProfile(profile) {
         const path = writableProfilePath(sysfs);
         if (!path)
-            throw new Error('o arquivo do perfil não é gravável (veja a regra udev no README)');
+            throw new Error('the profile file is not writable (see the udev rule in the README)');
         if (!this.state().choices.includes(profile))
-            throw new Error(`perfil "${profile}" não é suportado pelo firmware`);
+            throw new Error(`profile "${profile}" is not supported by the firmware`);
         writeText(path, profile);
     }
 
     /** Sets one of the three power-profiles-daemon profiles (PPD mode). */
     async setPpdProfile(profile) {
         if (!PPD_PROFILES.includes(profile))
-            throw new Error(`perfil "${profile}" desconhecido`);
+            throw new Error(`unknown profile "${profile}"`);
         const svc = await this._findPpd();
         if (!svc)
-            throw new Error('power-profiles-daemon não está rodando');
+            throw new Error('power-profiles-daemon is not running');
         await Gio.DBus.system.call(
             svc.name, svc.path, 'org.freedesktop.DBus.Properties', 'Set',
             new GLib.Variant('(ssv)', [svc.iface, 'ActiveProfile', new GLib.Variant('s', profile)]),

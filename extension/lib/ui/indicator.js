@@ -115,7 +115,7 @@ class HeliosIndicator extends PanelMenu.Button {
     }
 
     _buildMenu() {
-        this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem('Temperaturas'));
+        this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem('Temperatures'));
         this._rowCpu = makeInfoRow('CPU');
         this._rowGpu = makeInfoRow('GPU');
         this.menu.addMenuItem(this._rowCpu.item);
@@ -125,7 +125,7 @@ class HeliosIndicator extends PanelMenu.Button {
         this.menu.addMenuItem(this._fanSection);
         this._fanRows = [];
 
-        this._profileHeader = new PopupMenu.PopupSeparatorMenuItem('Perfil de energia');
+        this._profileHeader = new PopupMenu.PopupSeparatorMenuItem('Power Profile');
         this.menu.addMenuItem(this._profileHeader);
         this._profileSection = new PopupMenu.PopupMenuSection();
         this.menu.addMenuItem(this._profileSection);
@@ -137,7 +137,7 @@ class HeliosIndicator extends PanelMenu.Button {
         this.menu.addMenuItem(this._lightingSection);
 
         this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
-        this.menu.addAction('Configurações', () => this._ext.openPreferences());
+        this.menu.addAction('Settings', () => this._ext.openPreferences());
     }
 
     _createSensors() {
@@ -157,7 +157,7 @@ class HeliosIndicator extends PanelMenu.Button {
     _rebuildFanRows() {
         this._fanSection.removeAll();
         this._fanRows = this._fans.read().map(f => {
-            const row = makeInfoRow(f.label.startsWith('Fan') ? f.label.replace('Fan', 'Ventoinha') : f.label);
+            const row = makeInfoRow(f.label);
             this._fanSection.addMenuItem(row.item);
             return row;
         });
@@ -251,7 +251,7 @@ class HeliosIndicator extends PanelMenu.Button {
         seg.box.visible = this._settings.get_boolean('show-cpu');
         this._renderTemp(seg, this._rowCpu, celsius, 'cpu-warm', 'cpu-hot');
         if (celsius === null)
-            this._rowCpu.value.text = 'sensor não encontrado';
+            this._rowCpu.value.text = 'sensor not found';
     }
 
     _renderGpu({state, celsius}) {
@@ -261,7 +261,7 @@ class HeliosIndicator extends PanelMenu.Button {
 
         if (state === 'none') {
             seg.box.visible = false;
-            this._rowGpu.value.text = 'não encontrada';
+            this._rowGpu.value.text = 'not found';
             this._rowGpu.value.set_style(null);
             return;
         }
@@ -270,7 +270,7 @@ class HeliosIndicator extends PanelMenu.Button {
             seg.label.text = 'off';
             seg.box.opacity = 128;
             this._paint(seg, null, false);
-            this._rowGpu.value.text = 'desligada (economizando)';
+            this._rowGpu.value.text = 'off (power saving)';
             this._rowGpu.value.set_style(null);
             return;
         }
@@ -315,10 +315,10 @@ class HeliosIndicator extends PanelMenu.Button {
         } else if (this._switchMode === SwitchMode.PPD) {
             options = PPD_PROFILES.map(id => ({id, label: PPD_LABELS[id]}));
             selected = ppdForPlatform(state.current);
-            hint = 'Todos os perfis: tecla de modo ou regra udev (README)';
+            hint = 'All profiles: mode key or udev rule (README)';
         } else {
             options = [];
-            hint = 'Troca pelo menu indisponível; use a tecla de modo';
+            hint = 'Switching from the menu is unavailable; use the mode key';
         }
 
         const key = `${this._switchMode}|${style}|${options.map(o => o.id).join(',')}`;
@@ -347,7 +347,7 @@ class HeliosIndicator extends PanelMenu.Button {
             else if (this._switchMode === SwitchMode.PPD)
                 await this._platform.setPpdProfile(id);
         } catch (e) {
-            Main.notify('Helios Panel', `Não foi possível mudar o perfil: ${e.message}`);
+            Main.notify('Helios Panel', `Could not change the profile: ${e.message}`);
         }
         // The firmware applies the change asynchronously; read it back shortly.
         if (this._readbackId)
@@ -365,7 +365,7 @@ class HeliosIndicator extends PanelMenu.Button {
         if (!this._lighting)
             return;
         // Placeholder until a real backend exists: shows which one was found.
-        this._lightingSection.addMenuItem(new PopupMenu.PopupSeparatorMenuItem('Iluminação'));
+        this._lightingSection.addMenuItem(new PopupMenu.PopupSeparatorMenuItem('Lighting'));
         const row = makeInfoRow(this._lighting.displayName);
         row.value.text = this._lighting.capabilities().targets.join(', ');
         this._lightingSection.addMenuItem(row.item);

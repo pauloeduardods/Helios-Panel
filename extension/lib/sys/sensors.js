@@ -31,7 +31,7 @@ class HwmonTemp {
     }
 
     describe() {
-        return this.sensor ? `${this.sensor.chip} / ${this.sensor.label}` : 'nenhum';
+        return this.sensor ? `${this.sensor.chip} / ${this.sensor.label}` : 'none';
     }
 }
 
@@ -90,8 +90,8 @@ export class GpuSensor {
         if (this._hw)
             return this._hw.describe();
         if (this._nvidia)
-            return `nvidia-smi (a cada ${this._nvidia.queryIntervalSec}s, ${this._nvidia.powerStatus() ?? '?'})`;
-        return 'nenhum';
+            return `nvidia-smi (every ${this._nvidia.queryIntervalSec}s, ${this._nvidia.powerStatus() ?? '?'})`;
+        return 'none';
     }
 
     destroy() {
