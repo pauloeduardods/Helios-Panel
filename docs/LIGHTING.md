@@ -1,9 +1,9 @@
 # Keyboard and logo lighting: research and plan
 
-> **Status: plan, waiting for approval.** Nothing in this document has been
-> implemented, and nothing has written to the lighting hardware yet. Every
-> fact below comes from reading files: the firmware's ACPI tables, and the
-> source of two community drivers.
+> **Status: plan, partly approved** (see [the decisions](#decisions-for-approval)).
+> Nothing in this document has been implemented, and nothing has written to
+> the lighting hardware yet. Every fact below comes from reading files: the
+> firmware's ACPI tables, and the source of two community drivers.
 
 ## Summary
 
@@ -121,18 +121,24 @@ Evidence so far:
   PH16-72 (the non-Neo Helios 16), and none of its lid-logo support goes
   through WMI. This firmware may simply be shared with that model.
 - The EC field names do not say "logo" or "bar".
+- **Observed on the machine** (2026-10-14): the lid logo is RGB and there is
+  no light strip. On Linux the logo stays off, except that it lights up
+  briefly when the platform profile changes with the lid open. That happens
+  under Windows too, and there it seems to stay on and changes colour. So
+  the firmware drives the logo by itself, and `LB` is very likely the logo.
 
 How we settle it, in order:
 
-1. **You look** at the laptop: does the lid logo light up at all, and has it
-   ever changed colour (for example under Windows with PredatorSense)? Is
-   there any light strip on the back or front edge?
-2. **REA on PredatorSense**, if you approve it: the Windows app's per-model
-   configuration should say which lighting devices the PHN16-72 has.
+1. ~~**You look** at the laptop.~~ Done, see above.
+2. **REA on PredatorSense**, optional: the Windows app's per-model
+   configuration should say which lighting devices the PHN16-72 has. The
+   Windows partition on this machine is BitLocker-encrypted, so the binaries
+   would come from Acer's PredatorSense installer download, analysed on
+   Linux. No Windows boot is needed.
 3. **One supervised write**, only after your explicit approval: set `LB` to
    a single static colour through method 20 target 2 while you watch, then
-   set it back. Reading (method 21) cannot settle it, because it returns the
-   EC registers whether or not an LED is connected.
+   set it back. Reading (method 21) cannot settle it on its own, because it
+   returns the EC registers whether or not an LED is connected.
 
 Until then, logo support stays out of the D-Bus API.
 
@@ -171,7 +177,21 @@ Until then, logo support stays out of the D-Bus API.
   a one-time Machine Owner Key enrolment: DKMS creates a key, you set a
   one-time password, and on the next boot the blue "MOK manager" screen asks
   you to confirm it. That is the only boot-time step, and it is reversible
-  (`mokutil --delete`).
+  (`mokutil --delete`). This machine has no MOK enrolled yet: its NVIDIA
+  driver comes from Ubuntu's prebuilt, Canonical-signed `linux-modules-nvidia`
+  packages, so nothing else has needed one.
+- **Other users** fall into three groups:
+  - Secure Boot off: DKMS builds the module, and no key is needed.
+  - Secure Boot on, MOK already enrolled (common if they use any DKMS
+    driver, such as `nvidia-dkms` or VirtualBox): DKMS signs with the
+    existing key, and no extra step is needed.
+  - Secure Boot on, no MOK: the same one-time enrolment as here. Ubuntu's
+    DKMS asks for the password during the install.
+
+  The module is an optional extra. Without it, Helios still works and only
+  hides the lighting section. The long-term fix that removes the step for
+  everyone is getting the feature into mainline `acer-wmi`, which
+  distributions sign.
 - Per the project rules, **Helios never loads it**. `install.sh` does not
   touch it. `heliosctl doctor` gains a check that detects whether the module
   is built, signed and loaded, and **prints** the `dkms install` / `modprobe`
@@ -235,15 +255,16 @@ The worst realistic outcome is a wrong keyboard colour until the next write.
 
 ## Decisions for approval
 
-1. **Kernel path**: write our own minimal `helios-acer-lighting` module
-   (recommended), rather than using predator-sense/Linuwu-Sense or waiting
-   for upstream.
+1. **Kernel path**: write our own minimal `helios-acer-lighting` module,
+   rather than using predator-sense/Linuwu-Sense or waiting for upstream.
+   **Approved.**
 2. **Secure Boot**: accept the one-time MOK enrolment for a DKMS-signed
-   module.
+   module. *Pending.*
 3. **Scope of the first version**: the keyboard only (effects 0–5 and the 4
    static zones). `LB`/logo comes later, after it is identified.
-4. **The `LB` question**: answer what you see on the laptop (step 1 above),
-   and say whether to run REA on PredatorSense (step 2).
-5. **D-Bus API and polkit action** as described above.
+   **Approved.**
+4. **The `LB` question**: answered (the lid logo is RGB, and there is no
+   light strip). Whether to run REA on PredatorSense (step 2) is *pending*.
+5. **D-Bus API and polkit action** as described above. *Pending.*
 6. **First hardware write**: only through the written test protocol, with
-   you present.
+   you present. **Approved.**
