@@ -30,6 +30,8 @@ export default class HeliosPanelPreferences extends ExtensionPreferences {
         show.add(switchRow(settings, 'hide-gpu-when-off', 'Hide the GPU when it is off',
             'Otherwise shows a dimmed "off"'));
         show.add(switchRow(settings, 'show-fans', 'Fan speed'));
+        show.add(switchRow(settings, 'show-power', 'Power draw',
+            'Watts while on battery, a dimmed "AC" when plugged in'));
         show.add(switchRow(settings, 'show-profile', 'Power profile'));
         show.add(switchRow(settings, 'show-icons', 'Icons'));
         show.add(switchRow(settings, 'show-unit', 'Show "°C"', 'When off, shows only "°"'));

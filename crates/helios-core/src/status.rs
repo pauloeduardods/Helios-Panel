@@ -7,6 +7,7 @@ use serde::Serialize;
 use crate::hwmon::{self, milli_to_celsius};
 use crate::io::{Clock, GpuQuery, SysFs, read_int};
 use crate::nvidia::{GpuState, NvidiaGpu};
+use crate::power::{PowerMonitor, PowerStatus};
 use crate::profile::{self, ProfileState};
 
 /// Bumped on incompatible changes to the JSON layout.
@@ -21,6 +22,7 @@ pub struct Status {
     pub cpu: CpuStatus,
     pub gpu: GpuStatus,
     pub fans: Vec<FanStatus>,
+    pub power: PowerStatus,
     pub profile: ProfileState,
     pub temperatures: Vec<TempStatus>,
 }
@@ -36,6 +38,8 @@ pub struct GpuStatus {
     pub source: Option<String>,
     pub state: GpuState,
     pub celsius: Option<f64>,
+    /// Board power draw; only from nvidia-smi.
+    pub watts: Option<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -61,16 +65,19 @@ fn read_celsius(fs: &dyn SysFs, path: &str) -> Option<f64> {
     read_int(fs, path).map(|m| round_tenth(milli_to_celsius(m)))
 }
 
-/// Keeps the state that must survive between polls (the NVIDIA rate limit).
+/// Keeps the state that must survive between polls (the NVIDIA rate limit,
+/// the averaged battery draw).
 #[derive(Debug)]
 pub struct Monitor {
     nvidia: Option<NvidiaGpu>,
+    power: PowerMonitor,
 }
 
 impl Monitor {
     pub fn new(fs: &dyn SysFs) -> Self {
         Self {
             nvidia: NvidiaGpu::detect(fs),
+            power: PowerMonitor::default(),
         }
     }
 
@@ -95,6 +102,7 @@ impl Monitor {
                 celsius: read_celsius(fs, &amd.path),
                 source: Some(amd.id()),
                 state: GpuState::On,
+                watts: None,
             }
         } else if let (Some(nvidia), Some(query)) = (self.nvidia.as_mut(), gpu_query) {
             let reading = nvidia.read(fs, query, clock);
@@ -102,12 +110,14 @@ impl Monitor {
                 source: Some(NVIDIA_SMI_SOURCE.to_owned()),
                 state: reading.state,
                 celsius: reading.celsius.map(round_tenth),
+                watts: reading.watts.map(round_tenth),
             }
         } else {
             GpuStatus {
                 source: None,
                 state: GpuState::None,
                 celsius: None,
+                watts: None,
             }
         };
 
@@ -136,6 +146,7 @@ impl Monitor {
             cpu,
             gpu,
             fans,
+            power: self.power.poll(fs, clock),
             profile: profile::read_state(fs),
             temperatures,
         }
@@ -161,8 +172,15 @@ mod tests {
             json!({
                 "schema": 1,
                 "cpu": {"sensor": "hwmon:coretemp/Package id 0", "celsius": 61.0},
-                "gpu": {"source": "nvidia-smi", "state": "off", "celsius": null},
+                "gpu": {"source": "nvidia-smi", "state": "off", "celsius": null, "watts": null},
                 "fans": [{"label": "Fan 1", "rpm": 2350}, {"label": "Fan 2", "rpm": 2600}],
+                "power": {
+                    "source": "ac",
+                    "battery": {
+                        "name": "BAT1", "state": "not-charging", "percent": 80.0, "watts": 0.0,
+                        "health_percent": 92.0, "cycles": 0, "minutes_left": null,
+                    },
+                },
                 "profile": {
                     "available": true, "active": "balanced", "driver": "acer-wmi",
                     "choices": ["low-power", "quiet", "balanced", "balanced-performance", "performance"],
@@ -182,14 +200,15 @@ mod tests {
     fn phn16_72_with_the_gpu_awake() {
         let fs = FakeFs::new(PHN16_72);
         fs.set(STATUS, "active");
-        let smi = FakeGpu::new("47\n");
+        let smi = FakeGpu::new("47, 35.23\n");
         let status = Monitor::new(&fs).poll(&fs, Some(&smi), &FakeClock::default());
         assert_eq!(
             status.gpu,
             GpuStatus {
                 source: Some("nvidia-smi".into()),
                 state: GpuState::On,
-                celsius: Some(47.0)
+                celsius: Some(47.0),
+                watts: Some(35.2),
             }
         );
         assert_eq!(smi.calls(), 1);
@@ -223,7 +242,8 @@ mod tests {
             GpuStatus {
                 source: None,
                 state: GpuState::None,
-                celsius: None
+                celsius: None,
+                watts: None,
             }
         );
     }
@@ -239,11 +259,13 @@ mod tests {
             GpuStatus {
                 source: Some("hwmon:amdgpu/edge".into()),
                 state: GpuState::On,
-                celsius: Some(50.0)
+                celsius: Some(50.0),
+                watts: None,
             }
         );
         assert!(status.fans.is_empty());
         assert!(!status.profile.available);
+        assert_eq!(status.power.battery, None);
         assert_eq!(status.temperatures.len(), 4);
     }
 

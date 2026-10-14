@@ -6,6 +6,7 @@
     <key name="show-cpu" type="b"><default>true</default><summary>Show CPU temperature</summary></key>
     <key name="show-gpu" type="b"><default>true</default><summary>Show GPU temperature</summary></key>
     <key name="show-fans" type="b"><default>false</default><summary>Show fan speed</summary></key>
+    <key name="show-power" type="b"><default>false</default><summary>Show power draw on battery</summary></key>
     <key name="show-profile" type="b"><default>true</default><summary>Show power profile</summary></key>
     <key name="show-icons" type="b"><default>true</default><summary>Show icons</summary></key>
     <key name="show-unit" type="b"><default>false</default><summary>Show "°C" instead of "°"</summary></key>
