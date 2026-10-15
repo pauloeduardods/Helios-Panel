@@ -9,7 +9,7 @@ import {
     usageFromDbus, historyFromDbus, sparklineSegments, sparklinePieces, HistoryBuffer,
     historySample, normalizeOrder, moveItem, PANEL_ITEMS, parseColor,
     KEYBOARD_EFFECTS, LIGHT_COLORS, effectLabel, keyboardRequest, lightingError, lightingFromDbus,
-    logoRequest,
+    logoRequest, powerSummary, usageSummary,
 } from '../extension/lib/model.js';
 
 // What heliosd publishes on a PHN16-72 with the NVIDIA GPU asleep.
@@ -350,4 +350,12 @@ test('lighting labels and errors', () => {
     assert.equal(LIGHT_COLORS.length, 9);
     for (const {color} of LIGHT_COLORS)
         assert.match(color, /^#[0-9a-f]{6}$/);
+});
+
+test('collapsed menu titles summarize their section', () => {
+    assert.equal(usageSummary({cpu: 23.4, gpu: 4, averageGhz: null, maxGhz: null}), 'Usage · CPU 23% · GPU 4%');
+    assert.equal(usageSummary({cpu: null, gpu: null}), 'Usage');
+    assert.equal(powerSummary({source: 'ac', battery: {percent: 80, watts: 0}}), 'Power · AC · 80%');
+    assert.equal(powerSummary({source: 'battery', battery: {percent: 64.4, watts: 18.2}}), 'Power · 64% · 18.2 W');
+    assert.equal(powerSummary({source: null, battery: null}), 'Power');
 });

@@ -25,8 +25,8 @@ import {
 import {
     EFFECTS_WITH_COLOR, EFFECTS_WITH_DIRECTION, LIGHT_COLORS, Level, barPieces, batteryStateLabel,
     daemonMessage, effectLabel, formatClock, formatDuration, formatPercent, formatTemp, formatWatts,
-    keyboardRequest, lightingError, logoRequest, parseColor, pickCpu, pickGpu, profileLabel,
-    setProfileError, sparklinePieces, tempLevel,
+    keyboardRequest, lightingError, logoRequest, parseColor, pickCpu, pickGpu, powerSummary,
+    profileLabel, setProfileError, sparklinePieces, tempLevel, usageSummary,
 } from '../model.js';
 
 function makeSegment(iconPath = null) {
@@ -59,26 +59,27 @@ function drawBars(area, bars, rgbOf) {
     cr.$dispose();
 }
 
-function makeInfoRow(title) {
+/**
+ * A menu row: name, then (with `draw`) a small graph on the same line, then
+ * the value. `draw(area)` paints the graph.
+ */
+function makeInfoRow(title, draw = null) {
     const item = new PopupMenu.PopupBaseMenuItem({reactive: false, can_focus: false});
     const name = new St.Label({text: title, x_expand: true, y_align: Clutter.ActorAlign.CENTER});
     const value = new St.Label({
         text: '--', style_class: 'helios-menu-value', y_align: Clutter.ActorAlign.CENTER,
     });
     item.add_child(name);
+    let graph = null;
+    if (draw) {
+        graph = new St.DrawingArea({
+            style_class: 'helios-inline-graph', y_align: Clutter.ActorAlign.CENTER, visible: false,
+        });
+        graph.connect('repaint', () => draw(graph));
+        item.add_child(graph);
+    }
     item.add_child(value);
-    return {item, name, value};
-}
-
-/** A small graph under a menu row; `draw(area)` paints it. */
-function makeSparkline(draw) {
-    const item = new PopupMenu.PopupBaseMenuItem({
-        reactive: false, can_focus: false, style_class: 'helios-sparkline-item',
-    });
-    const area = new St.DrawingArea({style_class: 'helios-sparkline', x_expand: true});
-    area.connect('repaint', () => draw(area));
-    item.add_child(area);
-    return {item, area};
+    return {item, name, value, graph};
 }
 
 /**
@@ -166,10 +167,12 @@ class HeliosIndicator extends PanelMenu.Button {
 
         this._buildPanel();
         this._buildMenu();
-        this.menu.connect('open-state-changed', (_menu, open) => {
-            if (open)
-                this._renderSparklines();
-        });
+        for (const menu of [this.menu, this._usageMenu.menu, this._powerMenu.menu]) {
+            menu.connect('open-state-changed', (_menu, open) => {
+                if (open)
+                    this._renderSparklines();
+            });
+        }
 
         this._settingsId = this._settings.connect('changed', (_s, key) => {
             if (key === 'profile-names')
@@ -239,58 +242,50 @@ class HeliosIndicator extends PanelMenu.Button {
         this._statusSection.addMenuItem(this._statusHint.item);
         this.menu.addMenuItem(this._statusSection);
 
+        // Always shown: the temperatures, each with its graph on the same line.
         this._readingsSection = new PopupMenu.PopupMenuSection();
-        this._readingsSection.addMenuItem(new PopupMenu.PopupSeparatorMenuItem('Temperatures'));
-        this._rowCpu = makeInfoRow('CPU');
-        this._rowGpu = makeInfoRow('GPU');
+        this._rowCpu = this._graphRow('CPU', 'cpu-celsius');
+        this._rowGpu = this._graphRow('GPU', 'gpu-celsius');
         this._readingsSection.addMenuItem(this._rowCpu.item);
-        this._addSparkline(this._readingsSection, 'cpu-celsius', this._rowCpu);
         this._readingsSection.addMenuItem(this._rowGpu.item);
-        this._addSparkline(this._readingsSection, 'gpu-celsius', this._rowGpu);
         this._deviceSection = new PopupMenu.PopupMenuSection();
         this._readingsSection.addMenuItem(this._deviceSection);
         this._fanSection = new PopupMenu.PopupMenuSection();
         this._readingsSection.addMenuItem(this._fanSection);
         this.menu.addMenuItem(this._readingsSection);
 
-        this._usageSection = new PopupMenu.PopupMenuSection();
-        this._usageSection.addMenuItem(new PopupMenu.PopupSeparatorMenuItem('Usage'));
-        this._usageRows = {
-            cpu: makeInfoRow('CPU'),
-            clock: makeInfoRow('CPU clock'),
-            gpu: makeInfoRow('GPU'),
-        };
-        const usageSeries = {cpu: 'cpu-usage', gpu: 'gpu-usage'};
-        for (const [key, row] of Object.entries(this._usageRows)) {
-            this._usageSection.addMenuItem(row.item);
-            if (usageSeries[key])
-                this._addSparkline(this._usageSection, usageSeries[key], row);
-        }
-        this.menu.addMenuItem(this._usageSection);
+        // The rest, collapsed until clicked (one open at a time); each title
+        // carries a short summary.
+        this._groupSeparator = new PopupMenu.PopupSeparatorMenuItem();
+        this.menu.addMenuItem(this._groupSeparator);
 
-        this._powerSection = new PopupMenu.PopupMenuSection();
-        this._powerSection.addMenuItem(new PopupMenu.PopupSeparatorMenuItem('Power'));
+        this._usageMenu = new PopupMenu.PopupSubMenuMenuItem('Usage');
+        this._usageRows = {
+            cpu: this._graphRow('CPU', 'cpu-usage'),
+            clock: makeInfoRow('CPU clock'),
+            gpu: this._graphRow('GPU', 'gpu-usage'),
+        };
+        for (const row of Object.values(this._usageRows))
+            this._usageMenu.menu.addMenuItem(row.item);
+        this.menu.addMenuItem(this._usageMenu);
+
+        this._powerMenu = new PopupMenu.PopupSubMenuMenuItem('Power');
         this._powerRows = {
             source: makeInfoRow('Source'),
             battery: makeInfoRow('Battery'),
-            draw: makeInfoRow('Draw'),
+            draw: this._graphRow('Draw', 'battery-watts'),
             timeLeft: makeInfoRow('Time left'),
-            cpu: makeInfoRow('CPU draw'),
+            cpu: this._graphRow('CPU draw', 'cpu-watts'),
             gpu: makeInfoRow('GPU draw'),
             health: makeInfoRow('Battery health'),
         };
-        const powerSeries = {draw: 'battery-watts', cpu: 'cpu-watts'};
-        for (const [key, row] of Object.entries(this._powerRows)) {
-            this._powerSection.addMenuItem(row.item);
-            if (powerSeries[key])
-                this._addSparkline(this._powerSection, powerSeries[key], row);
-        }
-        this.menu.addMenuItem(this._powerSection);
+        for (const row of Object.values(this._powerRows))
+            this._powerMenu.menu.addMenuItem(row.item);
+        this.menu.addMenuItem(this._powerMenu);
 
-        this._profileHeader = new PopupMenu.PopupSeparatorMenuItem('Power Profile');
-        this.menu.addMenuItem(this._profileHeader);
-        this._profileSection = new PopupMenu.PopupMenuSection();
-        this.menu.addMenuItem(this._profileSection);
+        this._profileMenu = new PopupMenu.PopupSubMenuMenuItem('Power profile');
+        this._profileSection = this._profileMenu.menu;
+        this.menu.addMenuItem(this._profileMenu);
 
         this._buildLighting();
 
@@ -305,7 +300,6 @@ class HeliosIndicator extends PanelMenu.Button {
     _buildLighting() {
         this._lighting = null;
         this._lightSection = new PopupMenu.PopupMenuSection();
-        this._lightSection.addMenuItem(new PopupMenu.PopupSeparatorMenuItem('Lighting'));
 
         this._kbMenu = new PopupMenu.PopupSubMenuMenuItem('Keyboard');
         this._effectSection = new PopupMenu.PopupMenuSection();
@@ -338,16 +332,16 @@ class HeliosIndicator extends PanelMenu.Button {
         this.menu.addMenuItem(this._lightSection);
     }
 
-    _addSparkline(section, series, row) {
-        const spark = makeSparkline(area => {
+    /** A row with its history graph on the same line. */
+    _graphRow(title, series) {
+        const row = makeInfoRow(title, area => {
             const [width, height] = area.get_surface_size();
             const pieces = sparklinePieces(this._history, series, width, height,
                 {levelOf: this._levelOf(series)});
             drawPieces(area, pieces, level => this._rgbFor(area, level), {alpha: 0.8});
         });
-        spark.item.visible = false;
-        section.addMenuItem(spark.item);
-        this._sparks.push({...spark, series, row});
+        this._sparks.push({row, series});
+        return row;
     }
 
     // ---------------------------------------------------------------- graphs
@@ -415,14 +409,14 @@ class HeliosIndicator extends PanelMenu.Button {
         });
     }
 
-    /** A menu graph shows under its row once it has two readings to join. */
+    /** A row's graph shows once it has two readings to join. */
     _renderSparklines() {
-        for (const {item, area, series, row} of this._sparks) {
+        for (const {series, row} of this._sparks) {
             const values = this._history?.series[series] ?? [];
             const known = values.filter(v => v !== null).length;
-            item.visible = row.item.visible && known >= 2;
-            if (item.visible && this.menu.isOpen)
-                area.queue_repaint();
+            row.graph.visible = row.item.visible && known >= 2;
+            if (row.graph.visible && this.menu.isOpen)
+                row.graph.queue_repaint();
         }
     }
 
@@ -437,8 +431,9 @@ class HeliosIndicator extends PanelMenu.Button {
         this._statusSeg.box.visible = message !== null;
         this._statusSection.actor.visible = message !== null;
         this._readingsSection.actor.visible = message === null;
-        this._usageSection.actor.visible = message === null;
-        this._powerSection.actor.visible = message === null;
+        this._groupSeparator.visible = message === null;
+        this._usageMenu.visible = message === null;
+        this._powerMenu.visible = message === null;
         if (message) {
             for (const seg of this._segs)
                 seg.box.visible = false;
@@ -537,7 +532,8 @@ class HeliosIndicator extends PanelMenu.Button {
         show(rows.cpu, usage.cpu === null ? null : formatPercent(usage.cpu));
         show(rows.clock, formatClock(usage));
         show(rows.gpu, usage.gpu === null ? null : formatPercent(usage.gpu));
-        this._usageSection.actor.visible = Object.values(rows).some(r => r.item.visible);
+        this._usageMenu.visible = Object.values(rows).some(r => r.item.visible);
+        this._usageMenu.label.text = usageSummary(usage);
     }
 
     _renderPower(power) {
@@ -559,13 +555,17 @@ class HeliosIndicator extends PanelMenu.Button {
         show(rows.health, battery && battery.health !== null
             ? `${Math.round(battery.health)}%${battery.cycles ? ` · ${battery.cycles} cycles` : ''}`
             : null);
-        this._powerSection.actor.visible = Object.values(rows).some(r => r.item.visible);
+        this._powerMenu.visible = Object.values(rows).some(r => r.item.visible);
+        this._powerMenu.label.text = powerSummary(power);
     }
 
     _renderProfile(state) {
         const style = this._settings.get_string('profile-names');
 
-        this._profileHeader.visible = state.available;
+        this._profileMenu.visible = state.available;
+        this._profileMenu.label.text = state.current
+            ? `Power profile · ${profileLabel(state.current, style)}`
+            : 'Power profile';
         const choices = state.available ? state.choices : [];
         const key = `${style}|${choices.join(',')}`;
         if (key !== this._profileMenuKey) {
@@ -608,7 +608,7 @@ class HeliosIndicator extends PanelMenu.Button {
         }
         for (const [id, item] of this._effectItems)
             item.setOrnament(id === keyboard.effect ? PopupMenu.Ornament.DOT : PopupMenu.Ornament.NONE);
-        this._kbMenu.label.text = `Keyboard: ${effectLabel(keyboard.effect)}`;
+        this._kbMenu.label.text = `Keyboard · ${effectLabel(keyboard.effect)}`;
 
         this._kbBrightness.set(keyboard.brightness / 100);
         this._kbSpeed.set(keyboard.speed / 9);
@@ -618,7 +618,7 @@ class HeliosIndicator extends PanelMenu.Button {
         this._kbColors.item.visible = EFFECTS_WITH_COLOR.includes(keyboard.effect);
         this._kbColors.select(keyboard.color);
 
-        this._logoMenu.label.text = `Lid logo: ${logo.on ? 'On' : 'Off'}`;
+        this._logoMenu.label.text = `Lid logo · ${logo.on ? 'On' : 'Off'}`;
         this._logoSwitch.setToggleState(logo.on);
         this._logoBrightness.item.visible = logo.on;
         this._logoBrightness.set(logo.brightness / 100);
