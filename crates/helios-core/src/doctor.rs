@@ -31,6 +31,19 @@ const DAEMON_FILES: &[&str] = &[
     "/usr/share/polkit-1/actions/io.github.pauloeduardods.helios.policy",
 ];
 
+/// The optional keyboard lighting module (kmod/helios-acer-lighting).
+pub const LIGHTING_MODULE_VERSION: &str = "0.1.0";
+const LIGHTING_LOADED: &str = "/sys/module/helios_acer_lighting";
+/// The gaming WMI device the module binds to, and the files it adds there.
+const LIGHTING_DEVICE: &str = "/sys/bus/wmi/devices/7A4DDFE7-5B5D-40B4-8595-4408E0CC7F56";
+const LIGHTING_ATTRS: &[&str] = &["keyboard_effect", "keyboard_zones"];
+/// Models in the module's DMI allow-list.
+const LIGHTING_MODELS: &[&str] = &["Predator PHN16-72"];
+const SECURE_BOOT: &str =
+    "/sys/firmware/efi/efivars/SecureBoot-8be4df61-93ca-11d2-aa0d-00e098032b8c";
+/// Where Ubuntu's DKMS keeps the key it signs modules with.
+const DKMS_MOK: &str = "/var/lib/shim-signed/mok/MOK.der";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Level {
@@ -353,6 +366,99 @@ fn check_profile(fs: &dyn SysFs, acer: bool) -> Finding {
     }
 }
 
+/// The EFI variable is 4 attribute bytes followed by 1 when Secure Boot is on.
+fn secure_boot(fs: &dyn SysFs) -> bool {
+    fs.read_to_string(SECURE_BOOT)
+        .is_some_and(|v| v.ends_with('\u{1}'))
+}
+
+fn lighting_installed(fs: &dyn SysFs) -> bool {
+    let Some(release) = fs.read_to_string("/proc/sys/kernel/osrelease") else {
+        return false;
+    };
+    ["", ".zst", ".xz", ".gz"].iter().any(|ext| {
+        fs.exists(&format!(
+            "/lib/modules/{release}/updates/dkms/helios-acer-lighting.ko{ext}"
+        ))
+    })
+}
+
+fn check_lighting(fs: &dyn SysFs) -> Finding {
+    let product = fs
+        .read_to_string(&format!("{DMI}/product_name"))
+        .unwrap_or_default();
+    if !LIGHTING_MODELS.contains(&product.as_str()) {
+        return finding(
+            "lighting",
+            Level::Info,
+            "keyboard lighting is not supported on this model yet",
+            &[],
+        );
+    }
+    let bound = LIGHTING_ATTRS
+        .iter()
+        .all(|a| fs.exists(&format!("{LIGHTING_DEVICE}/{a}")));
+    if bound {
+        return finding(
+            "lighting",
+            Level::Ok,
+            "helios-acer-lighting is loaded and bound to the gaming WMI device",
+            &[],
+        );
+    }
+    if fs.exists(LIGHTING_LOADED) {
+        return finding(
+            "lighting",
+            Level::Warn,
+            "helios-acer-lighting is loaded but not bound to the gaming WMI device",
+            &["journalctl -k -b | grep -i helios"],
+        );
+    }
+    let load = "sudo modprobe helios_acer_lighting";
+    let sb = secure_boot(fs);
+    if lighting_installed(fs) {
+        let msg = if sb {
+            "helios-acer-lighting is installed but not loaded. If modprobe says \"Key was \
+             rejected by service\", enroll the DKMS key first (docs/LIGHTING.md)"
+        } else {
+            "helios-acer-lighting is installed but not loaded"
+        };
+        return finding("lighting", Level::Info, msg, &[load]);
+    }
+
+    let v = LIGHTING_MODULE_VERSION;
+    let mut fix = Vec::new();
+    if !fs.exists("/usr/sbin/dkms") {
+        fix.push("sudo apt install dkms".to_owned());
+    }
+    if let Some(release) = fs.read_to_string("/proc/sys/kernel/osrelease") {
+        if !fs.exists(&format!("/lib/modules/{release}/build")) {
+            fix.push(format!("sudo apt install linux-headers-{release}"));
+        }
+    }
+    fix.push(format!(
+        "sudo cp -r kmod/helios-acer-lighting /usr/src/helios-acer-lighting-{v}"
+    ));
+    fix.push(format!("sudo dkms install helios-acer-lighting/{v}"));
+    let msg = if sb {
+        fix.push(format!("sudo mokutil --import {DKMS_MOK}"));
+        fix.push("sudo reboot".to_owned());
+        "the optional keyboard lighting module is not installed. Run these from the Helios \
+         Panel source directory. Secure Boot is on: on the next boot, enroll the key on the \
+         blue MOK screen (docs/LIGHTING.md)"
+    } else {
+        fix.push(load.to_owned());
+        "the optional keyboard lighting module is not installed. Run these from the Helios \
+         Panel source directory"
+    };
+    Finding {
+        check: "lighting",
+        level: Level::Info,
+        message: msg.to_owned(),
+        fix,
+    }
+}
+
 fn heliosd_pid(fs: &dyn SysFs) -> Option<String> {
     fs.read_dir("/proc")
         .into_iter()
@@ -411,6 +517,9 @@ pub fn run(fs: &dyn SysFs) -> Report {
         findings.extend(check_acer_wmi(fs, &directives));
     }
     findings.push(check_profile(fs, acer));
+    if acer {
+        findings.push(check_lighting(fs));
+    }
     findings.push(check_daemon(fs));
     Report { findings }
 }
@@ -464,6 +573,7 @@ mod tests {
                 .message
                 .starts_with("balanced (acer-wmi)")
         );
+        assert_eq!(get(&report, "lighting").level, Level::Ok);
         assert_eq!(
             get(&report, "heliosd").message,
             "installed and running (pid 4242)"
@@ -660,6 +770,119 @@ mod tests {
         let m = get(&doctor(&fs), "machine").clone();
         assert_eq!(m.level, Level::Info);
         assert!(m.message.contains("not a Predator or Nitro"));
+    }
+
+    const SB_ON: (&str, &str) = (SECURE_BOOT, "\u{6}\0\0\0\u{1}");
+    const SB_OFF: (&str, &str) = (SECURE_BOOT, "\u{6}\0\0\0\0");
+    const NO_LIGHTING: &[&str] = &["/sys/module/helios_acer_lighting", "/sys/bus/wmi"];
+    const DKMS_AND_HEADERS: &[(&str, &str)] = &[
+        ("/usr/sbin/dkms", "#!/bin/bash"),
+        ("/lib/modules/7.0.0-38-generic/build/Makefile", ""),
+    ];
+
+    fn lighting_with(extra: &[(&'static str, &'static str)], drop: &[&str]) -> Finding {
+        get(&doctor(&phn16_72(extra, drop)), "lighting").clone()
+    }
+
+    #[test]
+    fn lighting_loaded_but_not_bound() {
+        let f = lighting_with(&[], &["/sys/bus/wmi"]);
+        assert_eq!(f.level, Level::Warn);
+        assert!(f.message.contains("not bound"));
+    }
+
+    #[test]
+    fn lighting_installed_but_not_loaded() {
+        let ko = (
+            "/lib/modules/7.0.0-38-generic/updates/dkms/helios-acer-lighting.ko.zst",
+            "",
+        );
+        let f = lighting_with(&[ko, SB_OFF], NO_LIGHTING);
+        assert_eq!(f.level, Level::Info);
+        assert_eq!(f.fix, ["sudo modprobe helios_acer_lighting"]);
+        assert!(!f.message.contains("Key was rejected"));
+
+        let f = lighting_with(&[ko, SB_ON], NO_LIGHTING);
+        assert_eq!(f.fix, ["sudo modprobe helios_acer_lighting"]);
+        assert!(f.message.contains("Key was rejected"));
+
+        // Built for another kernel only: not installed for this one.
+        let old = (
+            "/lib/modules/6.17.0-35-generic/updates/dkms/helios-acer-lighting.ko.zst",
+            "",
+        );
+        let f = lighting_with(&[old, SB_OFF], NO_LIGHTING);
+        assert!(f.fix.iter().any(|c| c.starts_with("sudo dkms install")));
+    }
+
+    #[test]
+    fn lighting_not_installed_without_secure_boot() {
+        let mut extra = DKMS_AND_HEADERS.to_vec();
+        extra.push(SB_OFF);
+        let f = lighting_with(&extra, NO_LIGHTING);
+        assert_eq!(f.level, Level::Info);
+        assert_eq!(
+            f.fix,
+            [
+                "sudo cp -r kmod/helios-acer-lighting /usr/src/helios-acer-lighting-0.1.0",
+                "sudo dkms install helios-acer-lighting/0.1.0",
+                "sudo modprobe helios_acer_lighting",
+            ]
+        );
+    }
+
+    #[test]
+    fn lighting_not_installed_with_secure_boot_and_nothing_to_build_with() {
+        let f = lighting_with(&[SB_ON], NO_LIGHTING);
+        assert_eq!(f.level, Level::Info, "optional: not a problem");
+        assert_eq!(
+            f.fix,
+            [
+                "sudo apt install dkms",
+                "sudo apt install linux-headers-7.0.0-38-generic",
+                "sudo cp -r kmod/helios-acer-lighting /usr/src/helios-acer-lighting-0.1.0",
+                "sudo dkms install helios-acer-lighting/0.1.0",
+                "sudo mokutil --import /var/lib/shim-signed/mok/MOK.der",
+                "sudo reboot",
+            ]
+        );
+        assert!(f.message.contains("MOK screen"));
+        assert!(!doctor(&phn16_72(&[SB_ON], NO_LIGHTING)).has_problems());
+    }
+
+    #[test]
+    fn lighting_on_other_models_and_machines() {
+        let fs = phn16_72(&[], &["/sys/class/dmi"]);
+        fs.set("/sys/class/dmi/id/sys_vendor", "Acer");
+        fs.set("/sys/class/dmi/id/product_name", "Predator PH16-72");
+        let f = get(&doctor(&fs), "lighting").clone();
+        assert_eq!(f.level, Level::Info);
+        assert!(f.message.contains("not supported on this model"));
+        assert!(f.fix.is_empty());
+
+        let report = doctor(&FakeFs::new(AMD_DESKTOP));
+        assert!(report.findings.iter().all(|f| f.check != "lighting"));
+    }
+
+    /// The constants here must match the module's sources.
+    #[test]
+    fn lighting_constants_match_the_module() {
+        let dkms = include_str!("../../../kmod/helios-acer-lighting/dkms.conf");
+        let driver = include_str!("../../../kmod/helios-acer-lighting/driver.c");
+        assert!(dkms.contains(&format!("PACKAGE_VERSION=\"{LIGHTING_MODULE_VERSION}\"")));
+        assert!(driver.contains(&format!("MODULE_VERSION(\"{LIGHTING_MODULE_VERSION}\")")));
+        let guid = LIGHTING_DEVICE.rsplit('/').next().unwrap();
+        assert!(driver.contains(&format!("#define ACER_GAMING_WMI_GUID \"{guid}\"")));
+        for attr in LIGHTING_ATTRS {
+            assert!(driver.contains(&format!("DEVICE_ATTR_ADMIN_RW({attr})")));
+        }
+        assert_eq!(
+            driver.matches("DMI_PRODUCT_NAME").count(),
+            LIGHTING_MODELS.len()
+        );
+        for model in LIGHTING_MODELS {
+            assert!(driver.contains(&format!("DMI_EXACT_MATCH(DMI_PRODUCT_NAME, \"{model}\")")));
+        }
     }
 
     #[test]

@@ -1,8 +1,10 @@
 # Keyboard and logo lighting: research and plan
 
-> **Status: plan, approved on 2026-10-14** (see [the decisions](#decisions-for-approval)).
-> Nothing in this document has been implemented, and nothing has written to
-> the lighting hardware yet. Every fact below comes from reading files: the
+> **Status: plan approved on 2026-10-14** (see [the decisions](#decisions-for-approval)).
+> Step 1, the kernel module, is implemented in
+> [`kmod/helios-acer-lighting/`](../kmod/helios-acer-lighting/) and has not
+> run on the hardware yet; the heliosd interface and the extension section
+> come next. Every protocol fact below comes from reading files: the
 > firmware's ACPI tables, and the source of two community drivers.
 
 ## Summary
@@ -154,9 +156,13 @@ Until then, logo support stays out of the D-Bus API.
 
 ### The module
 
-- About 300 lines, in `kmod/helios-acer-lighting/`, licensed
+- About 500 lines in `kmod/helios-acer-lighting/`, licensed
   **GPL-2.0-or-later** (kernel modules must be GPL-2-compatible, and this is
-  compatible with the project's GPL-3.0-or-later).
+  compatible with the project's GPL-3.0-or-later). It has two parts:
+  `lighting.c`, the protocol (parsing, the exact firmware buffers,
+  formatting the read-back) with no kernel dependencies, and `driver.c`, the
+  WMI driver that connects it to the firmware. The protocol part only knows
+  the numbers of methods 6, 7, 20 and 21, and the driver refuses any other.
 - It binds only on the WMI GUID above **and** a DMI allow-list (to start,
   only "Predator PHN16-72"). On any other machine it does not load.
 - It exposes a tiny sysfs interface on the WMI device. Each write is one
@@ -166,13 +172,28 @@ Until then, logo support stays out of the D-Bus API.
   | Attribute | Write | Firmware calls |
   |---|---|---|
   | `keyboard_effect` | `<effect> <speed> <brightness> <direction> <rrggbb>`, e.g. `breathing 4 80 right ff0000` | method 20, target 1 |
-  | `keyboard_zones` | `<brightness> <rrggbb> <rrggbb> <rrggbb> <rrggbb>` | method 20 (static) + 4 × method 6 |
+  | `keyboard_zones` | `<brightness> <rrggbb> <rrggbb> <rrggbb> <rrggbb>` | method 20 (static, direction kept) + method 6 for zones 1 to 4 |
 
-  Reading the same attributes returns the current state (methods 21 and 7).
-  Effects 6 and 7, and the `LB` target, are not accepted until confirmed.
-- The files are root-only (0644 root:root). heliosd's sandbox gets
+  - `effect`: `static`, `breathing`, `neon`, `wave`, `shifting` or `zoom`.
+  - `speed`: 0 to 9. `brightness`: 0 to 100. Plain decimal, no sign, no
+    leading zeros.
+  - `direction`: `left` (firmware value 1, right to left) or `right` (2,
+    left to right). It is always sent, even for effects that ignore it.
+  - Colours: exactly six hex digits, no `#`.
+  - Words are separated by single spaces, and the line may end with one
+    newline. Anything else is rejected.
+
+  Reading the same attributes returns the current state in the same format
+  (methods 21 and 7). A value Helios cannot set, such as an effect chosen
+  under Windows, reads back as `unknown`. Effects 6 and 7, and the `LB`
+  target, are not accepted until confirmed.
+- Operations are serialized by a mutex, and a write stops at the first
+  firmware error (`-EIO`).
+- The files are root-only (0600 root:root). heliosd's sandbox gets
   `ReadWritePaths` for exactly these two attribute files, the same pattern as
   the platform profile.
+- Nothing is sent to the firmware when the module loads; only reading or
+  writing an attribute calls it.
 - **Secure Boot is on**, so the module must be signed. With DKMS that means
   a one-time Machine Owner Key enrolment: DKMS creates a key, you set a
   one-time password, and on the next boot the blue "MOK manager" screen asks
@@ -192,10 +213,50 @@ Until then, logo support stays out of the D-Bus API.
   hides the lighting section. The long-term fix that removes the step for
   everyone is getting the feature into mainline `acer-wmi`, which
   distributions sign.
-- Per the project rules, **Helios never loads it**. `install.sh` does not
-  touch it. `heliosctl doctor` gains a check that detects whether the module
-  is built, signed and loaded, and **prints** the `dkms install` / `modprobe`
-  commands for you to run.
+- Per the project rules, **Helios never installs or loads it**. `install.sh`
+  does not touch it. `heliosctl doctor` has a `lighting` check that tells
+  whether the module is not installed, installed but not loaded, loaded but
+  not bound, or working, and **prints** the commands for you to run (the
+  check is informational: a missing module is not a problem).
+- Once installed with DKMS, the kernel loads it at boot by itself through
+  its WMI alias, like any driver, and DKMS rebuilds and signs it for each
+  new kernel.
+
+### Installing it
+
+From the Helios Panel source directory (`heliosctl doctor` prints the same
+commands, adapted to what is missing):
+
+```bash
+sudo apt install dkms linux-headers-$(uname -r)   # if not installed yet
+sudo cp -r kmod/helios-acer-lighting /usr/src/helios-acer-lighting-0.1.0
+sudo dkms install helios-acer-lighting/0.1.0
+```
+
+Then, with Secure Boot **off**, or **on with the DKMS key already
+enrolled**:
+
+```bash
+sudo modprobe helios_acer_lighting
+```
+
+With Secure Boot **on** and no key enrolled yet (only once per machine):
+
+1. `sudo mokutil --import /var/lib/shim-signed/mok/MOK.der`. It asks you to
+   choose a one-time password, twice. Use only lowercase letters and digits,
+   because the boot screen uses a US keyboard layout.
+2. Reboot. A blue "MOK management" screen appears and waits about 10
+   seconds; if it times out, nothing changes, so just run step 1 again.
+3. Choose **Enroll MOK**, **Continue**, **Yes**, type the password, then
+   **Reboot**.
+4. The module loads by itself from then on. The password is not needed
+   again, and nothing appears on later boots.
+
+To remove the module: `sudo modprobe -r helios_acer_lighting`, then
+`sudo dkms remove helios-acer-lighting/0.1.0 --all` and
+`sudo rm -r /usr/src/helios-acer-lighting-0.1.0`. To remove the key:
+`sudo mokutil --delete /var/lib/shim-signed/mok/MOK.der`, confirmed the same
+way on the next boot.
 
 ## heliosd: the `Lighting` interface
 
@@ -234,11 +295,43 @@ after resume (logind `PrepareForSleep(false)`).
 
 | Layer | Tests |
 |---|---|
-| helios-core (pure) | payload builders produce exact bytes for every effect, direction and zone; every out-of-range value is rejected; byte 9 is always 1 for the keyboard; `0xFF` ("keep") is never produced; exhaustive checks over the full input ranges |
-| kernel module | built in CI against the runner's kernel headers with `-Werror`, plus `checkpatch.pl`; KUnit tests for its parser (the same accept/reject table as helios-core) |
+| helios-core (pure) | builds and parses the module's attribute lines; every out-of-range value is rejected before a line is built; exhaustive checks over the full input ranges |
+| kernel module (done) | `make -C kmod/helios-acer-lighting test`, part of `npm test`: the protocol code built in userspace with AddressSanitizer and UBSan against a fake firmware that records every call. It checks the exact bytes for every effect, direction and zone; every number from 0 to 999 for speed and brightness; about 30 malformed lines that must never reach the firmware; errors stopping a write; the read-back format; and 200,000 random lines, after each of which every call made must use only methods 6, 7, 20 or 21, target byte 1, single-zone masks and zeroed logo bytes. CI also builds the module against Ubuntu's generic kernel headers with `W=1` and `-Werror`, and runs `checkpatch.pl --strict`. (KUnit was the original idea; it needs a kernel built for it, which CI cannot do cheaply, so the protocol code is kernel-independent instead.) |
 | heliosd | private-bus integration tests with a fake sysfs tree for the module's files: valid calls write exactly the expected line; invalid ones never reach polkit; polkit denial writes nothing; the interface is absent without the module; state is restored at start |
 | extension | fake proxy: section hidden without capabilities; controls call the right method with the right arguments; error messages |
-| real hardware | a written protocol, run only with you present: (1) read-only state dump; (2) one zone, one colour; (3) all zones; (4) each effect; (5) the `LB` probe, only if approved. Stop at the first surprise |
+| real hardware | the [protocol below](#hardware-test-protocol), run only with you present |
+
+### Hardware test protocol
+
+Run only with the owner present, one step at a time, stopping at the first
+surprise (a wrong zone, a flicker that does not settle, an error, anything
+in `journalctl -k`). The first two steps only read.
+
+```bash
+D=/sys/bus/wmi/devices/7A4DDFE7-5B5D-40B4-8595-4408E0CC7F56
+```
+
+1. **Bound?** `ls -l $D/keyboard_effect $D/keyboard_zones` shows two root-only
+   files, and `heliosctl doctor` reports `lighting` as ok.
+2. **Read the current state** and keep it, to restore at the end:
+   `sudo cat $D/keyboard_effect $D/keyboard_zones | tee ~/helios-lighting-before.txt`
+3. **One colour**: `echo 'static 0 100 right ff0000' | sudo tee $D/keyboard_effect`.
+   Expect the whole keyboard red, and the same line when read back.
+4. **Brightness**: the same with `30` instead of `100`. Expect it dimmer.
+5. **Zones**: `echo '100 ff0000 00ff00 0000ff ffffff' | sudo tee $D/keyboard_zones`.
+   Expect red, green, blue and white from left to right, and the same line
+   when read back.
+6. **Effects**, one at a time, each read back:
+   `breathing 4 80 right 00ffff`, `neon 4 80 right 000000`,
+   `wave 4 80 left 000000`, `wave 4 80 right 000000`,
+   `shifting 4 80 right 000000`, `zoom 4 80 right 000000`.
+7. **Rejection**: `echo 'wave 10 80 right ff0000' | sudo tee $D/keyboard_effect`
+   must fail with "Invalid argument" and change nothing.
+8. **Restore** the two lines saved in step 2 (if they read `unknown`, pick
+   any static colour instead).
+
+The `LB` (logo) probe is not part of this protocol; it needs its own
+approval.
 
 ## Safety summary
 
