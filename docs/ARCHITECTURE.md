@@ -184,7 +184,7 @@ All properties are read-only and emit `org.freedesktop.DBus.Properties.Propertie
 | Member | Type | Meaning |
 |---|---|---|
 | `Version` | `s` | heliosd version, e.g. `0.2.0` |
-| `ApiVersion` | `u` | `6`; raised for compatible additions (2 added `GpuPower`, `PowerSource`, `Battery`; 3 added `CpuPower`; 4 added `CpuUsage`, `CpuFrequency`, `GpuUsage`, `Devices`; 5 added `GetHistory`; 6 added the `Lighting` interface) |
+| `ApiVersion` | `u` | `7`; raised for compatible additions (2 added `GpuPower`, `PowerSource`, `Battery`; 3 added `CpuPower`; 4 added `CpuUsage`, `CpuFrequency`, `GpuUsage`, `Devices`; 5 added `GetHistory`; 6 added the `Lighting` interface; 7 added the logo mode, which changed `Logo` and `SetLogo`) |
 
 ### `io.github.pauloeduardods.Helios1.Sensors`
 
@@ -237,10 +237,11 @@ when heliosd starts). Details and the hardware results are in
 |---|---|---|
 | `Effects` | `as` | the keyboard effects that can be set: `breathing`, `neon`, `wave`, `shifting`, `zoom` (static is not offered, see LIGHTING.md) |
 | `Directions` | `as` | `left`, `right` |
+| `LogoModes` | `as` | the logo modes that can be set: `static`, `breathing`, `cycle` |
 | `Keyboard` | `(suuss)` | effect, speed 0–9, brightness 0–100, direction, `#rrggbb`, as the module reads it back (the effect may be one Helios cannot set) |
-| `Logo` | `(bus)` | on, brightness 0–100, `#rrggbb` |
+| `Logo` | `(buss)` | on, brightness 0–100, `#rrggbb`, mode (`unknown` for a value Helios does not set) |
 | `SetKeyboardEffect(s effect, u speed, u brightness, s direction, s color)` | method | polkit `io.github.pauloeduardods.helios.set-lighting` |
-| `SetLogo(b on, u brightness, s color)` | method | same action |
+| `SetLogo(b on, u brightness, s color, s mode)` | method | same action |
 
 As with `SetProfile`: validate (an invalid argument never reaches polkit),
 polkit, one serialized write, read back, `PropertiesChanged`. The last applied

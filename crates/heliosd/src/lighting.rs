@@ -9,7 +9,8 @@ use std::sync::Arc;
 
 use futures_lite::StreamExt;
 use helios_core::lighting::{
-    self, DIRECTIONS, EFFECTS, KeyboardEffect, KeyboardState, LightingError, Logo, LogoState, Saved,
+    self, DIRECTIONS, EFFECTS, KeyboardEffect, KeyboardState, LOGO_MODES, LightingError, Logo,
+    LogoState, Saved,
 };
 use zbus::message::{Header, Type};
 use zbus::object_server::SignalEmitter;
@@ -24,8 +25,8 @@ const SAVED_FILE: &str = "lighting";
 
 /// (effect, speed, brightness, direction, "#rrggbb").
 pub type Keyboard = (String, u32, u32, String, String);
-/// (on, brightness, "#rrggbb").
-pub type LogoProp = (bool, u32, String);
+/// (on, brightness, "#rrggbb", mode).
+pub type LogoProp = (bool, u32, String, String);
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct LightingProps {
@@ -38,7 +39,7 @@ fn keyboard_prop(k: KeyboardState) -> Keyboard {
 }
 
 fn logo_prop(l: LogoState) -> LogoProp {
-    (l.on, l.brightness, l.color)
+    (l.on, l.brightness, l.color, l.mode)
 }
 
 impl LightingProps {
@@ -248,6 +249,12 @@ impl LightingIface {
         DIRECTIONS.iter().map(|s| (*s).to_owned()).collect()
     }
 
+    /// The logo modes Helios can set, in menu order.
+    #[zbus(property(emits_changed_signal = "const"))]
+    fn logo_modes(&self) -> Vec<String> {
+        LOGO_MODES.iter().map(|s| (*s).to_owned()).collect()
+    }
+
     /// (effect, speed 0-9, brightness 0-100, direction, "#rrggbb"), as the
     /// module reads it back. The effect may be one Helios cannot set.
     #[zbus(property)]
@@ -255,7 +262,7 @@ impl LightingIface {
         self.0.lighting().keyboard
     }
 
-    /// (on, brightness 0-100, "#rrggbb").
+    /// (on, brightness 0-100, "#rrggbb", mode). The mode may be `unknown`.
     #[zbus(property)]
     fn logo(&self) -> LogoProp {
         self.0.lighting().logo
@@ -291,11 +298,12 @@ impl LightingIface {
         on: bool,
         brightness: u32,
         color: String,
+        mode: String,
         #[zbus(header)] header: Header<'_>,
         #[zbus(signal_emitter)] emitter: SignalEmitter<'_>,
     ) -> Result<(), HeliosError> {
-        let what = format!("SetLogo({on}, {brightness}, {color:?})");
-        let request = Logo::validate(on, brightness, &color).map_err(|e| {
+        let what = format!("SetLogo({on}, {brightness}, {color:?}, {mode:?})");
+        let request = Logo::validate(on, brightness, &color, &mode).map_err(|e| {
             eprintln!("heliosd: {what}: rejected: {e}");
             HeliosError::from(e)
         })?;
