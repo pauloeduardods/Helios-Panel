@@ -270,6 +270,7 @@ fn doctor_json() {
             "acer_wmi",
             "predator_v4",
             "platform_profile",
+            "lighting",
             "heliosd"
         ]
     );

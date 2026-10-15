@@ -36,6 +36,18 @@ jobs:
       - name: npm run check
         run: npm run check
 
+      - name: Kernel module (build and checkpatch)
+        run: |
+          # Ubuntu's generic kernel headers, the kernel users run (not the
+          # runner's own Azure kernel).
+          sudo apt-get install -y -qq linux-headers-generic
+          kdir="$(ls -d /usr/src/linux-headers-*-generic | sort -V | tail -1)"
+          echo "building against $kdir"
+          make -C kmod/helios-acer-lighting KDIR="$kdir" W=1
+          "$kdir/scripts/checkpatch.pl" --no-tree --strict \
+            --ignore PREFER_KERNEL_TYPES \
+            -f kmod/helios-acer-lighting/{driver.c,lighting.c,lighting.h}
+
       - name: shellcheck
         run: shellcheck install.sh
 

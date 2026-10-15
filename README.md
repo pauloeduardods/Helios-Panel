@@ -19,6 +19,7 @@ It was built for the Acer Predator Helios Neo 16 (PHN16-72), but it works on any
 
 - **heliosd**: a small system service. It reads the sensors, publishes them on the system D-Bus and is the only part that changes the platform profile, and only after polkit allows it. It runs sandboxed by systemd, with no capabilities.
 - **heliosctl**: a command-line client (`heliosctl status`).
+- **helios-acer-lighting** (optional, in progress): a small kernel module for the PHN16-72's keyboard RGB, which Linux does not support yet. Helios never installs or loads it; `heliosctl doctor` prints the commands, and [docs/LIGHTING.md](docs/LIGHTING.md) explains them.
 - **The GNOME extension**: draws what heliosd publishes. It never runs anything as root, never reads `/sys` and never spawns processes. Without heliosd it shows `helios off`.
 
 Details are in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
@@ -121,6 +122,7 @@ heliosctl doctor          # check the setup and suggest fixes
 [ ok ] acer_wmi         acer_wmi is loaded with predator_v4=1
 [ ok ] predator_v4      set at boot by /etc/modprobe.d/acer-predator.conf:1
 [ ok ] platform_profile balanced (acer-wmi); choices: low-power, quiet, balanced, balanced-performance, performance
+[ ok ] lighting         helios-acer-lighting is loaded and bound to the gaming WMI device
 [ ok ] heliosd          installed and running (pid 1911038)
 
 Nothing to fix.
@@ -132,7 +134,8 @@ Nothing to fix.
 cargo test --workspace                                    # Rust tests (fake sysfs, private D-Bus, never the real ones)
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all --check
-npm test          # extension tests (node, fake D-Bus, no GNOME needed)
+npm test          # extension tests (node, fake D-Bus, no GNOME needed) and the
+                  # kernel module's protocol tests (needs gcc and make)
 npm run check     # syntax check of every module
 
 # reload the extension after ./install.sh: on X11, Alt+F2, r, Enter (no logout);

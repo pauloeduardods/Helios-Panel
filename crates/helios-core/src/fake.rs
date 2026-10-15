@@ -82,7 +82,8 @@ pub const PHN16_72: &[(&str, &str)] = &[
 ];
 
 /// The rest of a healthy PHN16-72 for `doctor`: DMI, acer_wmi loaded with
-/// predator_v4 from modprobe.d, heliosd installed and running.
+/// predator_v4 from modprobe.d, the lighting module loaded and bound, and
+/// heliosd installed and running.
 pub const PHN16_72_SYSTEM: &[(&str, &str)] = &[
     ("/sys/class/dmi/id/sys_vendor", "Acer"),
     ("/sys/class/dmi/id/product_name", "Predator PHN16-72"),
@@ -116,6 +117,16 @@ pub const PHN16_72_SYSTEM: &[(&str, &str)] = &[
     (
         "/usr/share/polkit-1/actions/io.github.pauloeduardods.helios.policy",
         "<policyconfig/>",
+    ),
+    ("/proc/sys/kernel/osrelease", "7.0.0-38-generic"),
+    ("/sys/module/helios_acer_lighting/version", "0.1.0"),
+    (
+        "/sys/bus/wmi/devices/7A4DDFE7-5B5D-40B4-8595-4408E0CC7F56/keyboard_effect",
+        "static 0 100 right ffffff",
+    ),
+    (
+        "/sys/bus/wmi/devices/7A4DDFE7-5B5D-40B4-8595-4408E0CC7F56/keyboard_zones",
+        "100 ffffff ffffff ffffff ffffff",
     ),
 ];
 

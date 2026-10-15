@@ -1,8 +1,9 @@
 # Architecture
 
 > **Status:** helios-core, heliosctl, heliosd, the D-Bus extension and the
-> installer and `heliosctl doctor` are implemented. Lighting is still
-> planned (see the [migration plan](#migration-plan)).
+> installer and `heliosctl doctor` are implemented. Lighting is in
+> progress: the kernel module is done, the heliosd interface and the
+> extension are next (see the [migration plan](#migration-plan)).
 
 ## Goals and scope
 
@@ -434,7 +435,8 @@ that uninstall leaves the tree byte-for-byte as it was.
 | 4 | heliosd (sensors, profile, `SetProfile`, polkit), data files, extension becomes a D-Bus client, `lib/core`/`lib/sys`/udev rule removed (done) |
 | 5 | `heliosctl doctor` (done) |
 | 6 | `install.sh` for extension + daemon, manifest-based `--uninstall` (done, before task 5) |
-| 7 | lighting research and API proposal (plan only): [LIGHTING.md](LIGHTING.md) |
+| 7 | lighting research and API proposal (plan only): [LIGHTING.md](LIGHTING.md) (done) |
+| 8 | lighting, step 1: the `helios-acer-lighting` kernel module and the `doctor` check (done); step 2: heliosd `Lighting` interface; step 3: extension section |
 
 ## Decisions
 
