@@ -29,7 +29,7 @@ struct fake {
 	int fail_with;		/* errno to return, or 0 for a bad status byte */
 	u8 effect[HAL_GET_EFFECT_OUT];
 	u8 logo[HAL_GET_LOGO_OUT];
-	u8 kbst, lbst;
+	u8 kbst, lbst, lbet;
 };
 
 static int fake_call(void *ctx, enum hal_method method, const u8 *in, size_t in_len,
@@ -62,6 +62,9 @@ static int fake_call(void *ctx, enum hal_method method, const u8 *in, size_t in_
 		break;
 	case HAL_GET_LOGO:
 		memcpy(out, f->logo, out_len);
+		break;
+	case HAL_GET_LOGO_MODE:
+		out[1] = f->lbet;
 		break;
 	case HAL_GET_STATE:
 		if (in[0] == 0x08)
@@ -163,6 +166,18 @@ static void check_invariants(void)
 			CHECK(c->in[4] <= 100, "logo brightness %u", c->in[4]);
 			CHECK(c->in[5] <= 1, "logo power %u", c->in[5]);
 			CHECK(c->in[6] == 0 && c->in[7] == 0, "method 12 tail");
+			break;
+		case HAL_SET_LOGO_MODE:
+			CHECK(c->in_len == HAL_SET_LOGO_MODE_IN, "method 10 size");
+			CHECK(c->in[0] == 1 && c->in[1] == 0, "method 10 selector");
+			CHECK(c->in[2] == 0 || c->in[2] == 3 || c->in[2] == 4, "logo mode %u",
+			      c->in[2]);
+			for (int b = 3; b < 8; b++)
+				CHECK(c->in[b] == 0, "method 10 byte %d is %u", b, c->in[b]);
+			break;
+		case HAL_GET_LOGO_MODE:
+			CHECK(c->in_len == HAL_GET_LOGO_MODE_IN && c->in[0] == 1 && c->in[1] == 0 &&
+			      c->in[2] == 0 && c->in[3] == 0, "method 11 input");
 			break;
 		case HAL_GET_EFFECT:
 			CHECK(c->in_len == HAL_GET_EFFECT_IN && c->in[0] == 1 && c->in[1] == 0 &&
@@ -351,17 +366,41 @@ static void test_logo_bytes(void)
 {
 	const u8 colour[8] = { 1, 0xff, 0x66, 0x00, 70, 1, 0, 0 };
 	const u8 power[16] = { 1, 0, 0, 0, 0, 0, 0, 0, 0, 2 };
+	const u8 still[8] = { 1, 0, 0, 0, 0, 0, 0, 0 };
+	const u8 cycle[8] = { 1, 0, 4, 0, 0, 0, 0, 0 };
 
 	reset();
 	CHECK(logo_store("1 70 ff6600\n") == 0, "valid logo line rejected");
-	CHECK(fake.count == 2, "%zu calls, want 2", fake.count);
+	CHECK(fake.count == 3, "%zu calls, want 3", fake.count);
 	CHECK(fake.calls[0].method == HAL_SET_LOGO, "first call is method 12");
 	check_bytes(&fake.calls[0], colour, 8, "logo colour");
 	CHECK(fake.calls[1].method == HAL_SET_EFFECT, "second call is method 20");
 	check_bytes(&fake.calls[1], power, 16, "logo power");
+	CHECK(fake.calls[2].method == HAL_SET_LOGO_MODE, "third call is method 10");
+	check_bytes(&fake.calls[2], still, 8, "no mode is static");
 	CHECK(fake.calls[0].pauses_before == 0 && fake.calls[1].pauses_before == 1 &&
-	      fake.pending_pauses == 0, "one pause, between the two calls");
+	      fake.calls[2].pauses_before == 1 && fake.pending_pauses == 0,
+	      "one pause between each two calls");
 	check_invariants();
+
+	reset();
+	CHECK(logo_store("1 70 ff6600 cycle\n") == 0, "cycle rejected");
+	check_bytes(&fake.calls[0], colour, 8, "cycle colour");
+	check_bytes(&fake.calls[2], cycle, 8, "cycle mode");
+	check_invariants();
+
+	static const char *const modes[] = { "static", "breathing", "cycle" };
+	static const u8 values[] = { 0, 3, 4 };
+
+	for (size_t i = 0; i < ARRAY_SIZE(modes); i++) {
+		char line[32];
+
+		reset();
+		snprintf(line, sizeof(line), "1 100 00ff00 %s", modes[i]);
+		CHECK(logo_store(line) == 0 && fake.count == 3 && fake.calls[2].in[2] == values[i],
+		      "%s", line);
+		check_invariants();
+	}
 
 	reset();
 	CHECK(logo_store("0 0 000000") == 0, "logo off rejected");
@@ -390,6 +429,9 @@ static void test_logo_rejects(void)
 	static const char *const bad[] = {
 		"", "1", "1 100", "2 100 ff0000", "01 100 ff0000", "1 101 ff0000", "1 100 ff000",
 		"on 100 ff0000", "1 100 ff0000 x", "1  100 ff0000", "1 100 #ff0000",
+		"1 100 ff0000 Cycle", "1 100 ff0000 3", "1 100 ff0000 unknown",
+		"1 100 ff0000 cycle x", "1 100 ff0000 cycle ", "1 100 ff0000  cycle",
+		"1 100 ff0000 wave",
 	};
 
 	for (size_t i = 0; i < ARRAY_SIZE(bad); i++) {
@@ -404,6 +446,16 @@ static void test_logo_rejects(void)
 	fake.fail_at = 1;
 	CHECK(logo_store("1 70 ff6600") == -EIO && fake.count == 1,
 	      "kept going after a failed colour write");
+
+	reset();
+	fake.fail_at = 2;
+	CHECK(logo_store("1 70 ff6600 cycle") == -EIO && fake.count == 2,
+	      "set the mode after a failed power write");
+
+	reset();
+	fake.fail_at = 3;
+	fake.fail_with = ETIMEDOUT;
+	CHECK(logo_store("1 70 ff6600 cycle") == -ETIMEDOUT, "mode write error lost");
 }
 
 static void test_logo_show(void)
@@ -414,9 +466,31 @@ static void test_logo_show(void)
 	reset();
 	memcpy(fake.logo, state, sizeof(state));
 	hal_logo_show(&fw, buf);
-	CHECK(!strcmp(buf, "1 80 123456\n"), "show gave \"%s\"", buf);
-	CHECK(fake.count == 1 && fake.calls[0].method == HAL_GET_LOGO, "read uses method 13");
+	CHECK(!strcmp(buf, "1 80 123456 static\n"), "show gave \"%s\"", buf);
+	CHECK(fake.count == 2 && fake.calls[0].method == HAL_GET_LOGO &&
+	      fake.calls[1].method == HAL_GET_LOGO_MODE, "read uses methods 13 and 11");
 	check_invariants();
+
+	static const struct {
+		u8 lbet;
+		const char *want;
+	} reads[] = {
+		{ 3, "1 80 123456 breathing\n" }, { 4, "1 80 123456 cycle\n" },
+		{ 1, "1 80 123456 unknown\n" }, { 9, "1 80 123456 unknown\n" },
+		{ 255, "1 80 123456 unknown\n" },
+	};
+
+	for (size_t i = 0; i < ARRAY_SIZE(reads); i++) {
+		reset();
+		memcpy(fake.logo, state, sizeof(state));
+		fake.lbet = reads[i].lbet;
+		hal_logo_show(&fw, buf);
+		CHECK(!strcmp(buf, reads[i].want), "LBET %u gave \"%s\"", reads[i].lbet, buf);
+	}
+
+	reset();
+	fake.fail_at = 2;
+	CHECK(hal_logo_show(&fw, buf) == -EIO, "failed mode read not reported");
 
 	reset();
 	fake.fail_at = 1;
@@ -459,6 +533,7 @@ static void test_fuzz(void)
 	static const char *const words[] = {
 		"static", "wave", "zoom", "left", "right", "0", "9", "10", "100", "101",
 		"255", "ff0000", "FFFFFF", "fff", "1", "2", "8", "unknown", "", "\n",
+		"breathing", "cycle", "3", "4",
 	};
 	unsigned int seed = 12345;
 	char line[128];

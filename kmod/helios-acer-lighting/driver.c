@@ -6,7 +6,7 @@
  * exposes validated, root-only attributes:
  *
  *   keyboard_effect  "<effect> <speed> <brightness> <direction> <rrggbb>"
- *   logo             "<on> <brightness> <rrggbb>"
+ *   logo             "<on> <brightness> <rrggbb> [static|breathing|cycle]"
  *   lighting_state   read-only diagnostics: "kbst=0xNN lbst=0xNN kles=0xNN"
  *
  * It only binds on the machines in the DMI allow-list below. Nothing is
@@ -58,6 +58,8 @@ static int wmi_call(void *ctx, enum hal_method method, const u8 *in, size_t in_l
 
 	switch (method) {
 	case HAL_GET_STATE:
+	case HAL_SET_LOGO_MODE:
+	case HAL_GET_LOGO_MODE:
 	case HAL_SET_LOGO:
 	case HAL_GET_LOGO:
 	case HAL_SET_EFFECT:
@@ -192,4 +194,4 @@ module_wmi_driver(helios_lighting_driver);
 MODULE_AUTHOR("Helios Panel contributors");
 MODULE_DESCRIPTION("Keyboard and logo RGB for Acer Predator laptops (Helios Panel)");
 MODULE_LICENSE("GPL");
-MODULE_VERSION("0.2.0");
+MODULE_VERSION("0.3.0");

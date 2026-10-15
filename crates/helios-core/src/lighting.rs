@@ -21,6 +21,9 @@ pub const LOGO_FILE: &str = "/sys/bus/wmi/devices/7A4DDFE7-5B5D-40B4-8595-4408E0
 /// The effects Helios can set, in menu order.
 pub const EFFECTS: &[&str] = &["breathing", "neon", "wave", "shifting", "zoom"];
 pub const DIRECTIONS: &[&str] = &["left", "right"];
+/// The logo modes, in menu order: lit in its colour, pulsing in its colour,
+/// cycling through the colours.
+pub const LOGO_MODES: &[&str] = &["static", "breathing", "cycle"];
 pub const MAX_SPEED: u32 = 9;
 pub const MAX_BRIGHTNESS: u32 = 100;
 
@@ -161,10 +164,16 @@ pub struct Logo {
     pub on: bool,
     pub brightness: u32,
     pub color: Color,
+    pub mode: &'static str,
 }
 
 impl Logo {
-    pub fn validate(on: bool, brightness: u32, color: &str) -> Result<Self, LightingError> {
+    pub fn validate(
+        on: bool,
+        brightness: u32,
+        color: &str,
+        mode: &str,
+    ) -> Result<Self, LightingError> {
         if brightness > MAX_BRIGHTNESS {
             return Err(invalid(format!(
                 "brightness {brightness} is not 0 to {MAX_BRIGHTNESS}"
@@ -172,31 +181,47 @@ impl Logo {
         }
         let color = Color::parse(color)
             .ok_or_else(|| invalid(format!("colour {color:?} is not #rrggbb")))?;
+        let mode = pick(LOGO_MODES, mode).ok_or_else(|| {
+            invalid(format!(
+                "unknown logo mode {mode:?}; expected one of: {}",
+                LOGO_MODES.join(", ")
+            ))
+        })?;
         Ok(Self {
             on,
             brightness,
             color,
+            mode,
         })
     }
 
     /// The line `logo` accepts.
     pub fn to_line(&self) -> String {
         format!(
-            "{} {} {}",
+            "{} {} {} {}",
             u8::from(self.on),
             self.brightness,
-            self.color.hex()
+            self.color.hex(),
+            self.mode
         )
     }
 
+    /// Parses a saved line, validating it again. A line saved before the
+    /// logo had modes has three words and means static.
     fn from_line(line: &str) -> Option<Self> {
-        let [on, brightness, color] = words(line)?;
+        let (on, brightness, color, mode) = match words::<4>(line) {
+            Some([on, brightness, color, mode]) => (on, brightness, color, mode),
+            None => {
+                let [on, brightness, color] = words(line)?;
+                (on, brightness, color, "static")
+            }
+        };
         let on = match on {
             "0" => false,
             "1" => true,
             _ => return None,
         };
-        Self::validate(on, brightness.parse().ok()?, color).ok()
+        Self::validate(on, brightness.parse().ok()?, color, mode).ok()
     }
 }
 
@@ -220,13 +245,15 @@ pub struct KeyboardState {
     pub color: String,
 }
 
-/// The logo as the module reads it back.
+/// The logo as the module reads it back. The mode may be `unknown`, for a
+/// value from another tool.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct LogoState {
     pub on: bool,
     pub brightness: u32,
     /// `#rrggbb`.
     pub color: String,
+    pub mode: String,
 }
 
 pub fn read_keyboard(fs: &dyn SysFs) -> Option<KeyboardState> {
@@ -243,11 +270,12 @@ pub fn read_keyboard(fs: &dyn SysFs) -> Option<KeyboardState> {
 
 pub fn read_logo(fs: &dyn SysFs) -> Option<LogoState> {
     let text = fs.read_to_string(LOGO_FILE)?;
-    let [on, brightness, color] = words(&text)?;
+    let [on, brightness, color, mode] = words(&text)?;
     Some(LogoState {
         on: on != "0",
         brightness: brightness.parse().ok()?,
         color: Color::parse(color)?.to_hash(),
+        mode: mode.to_owned(),
     })
 }
 
@@ -279,7 +307,7 @@ pub fn apply_logo(fs: &dyn SysFs, logo: &Logo) -> Result<Option<LogoState>, Ligh
 ///
 /// ```text
 /// keyboard wave 4 80 left ff0000
-/// logo 1 100 00ff00
+/// logo 1 100 00ff00 cycle
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Saved {
@@ -324,7 +352,7 @@ mod tests {
 
     const BOUND: &[(&str, &str)] = &[
         (KEYBOARD_FILE, "wave 5 100 left 000000"),
-        (LOGO_FILE, "0 0 000000"),
+        (LOGO_FILE, "0 0 000000 static"),
     ];
 
     fn wave() -> KeyboardEffect {
@@ -350,7 +378,7 @@ mod tests {
             let brightness = KeyboardEffect::validate("neon", 5, n, "left", "#000000");
             assert_eq!(brightness.is_ok(), n <= MAX_BRIGHTNESS, "brightness {n}");
             assert_eq!(
-                Logo::validate(true, n, "#000000").is_ok(),
+                Logo::validate(true, n, "#000000", "static").is_ok(),
                 n <= MAX_BRIGHTNESS,
                 "logo {n}"
             );
@@ -381,18 +409,31 @@ mod tests {
                 "{effect} {direction} {color}: {e:?}"
             );
         }
-        assert!(Logo::validate(true, 50, "#12345").is_err());
-        assert!(Logo::validate(true, 50, "nope").is_err());
+        assert!(Logo::validate(true, 50, "#12345", "static").is_err());
+        assert!(Logo::validate(true, 50, "nope", "static").is_err());
+        for mode in ["", "Cycle", "unknown", "wave", "3", "cycle "] {
+            let e = Logo::validate(true, 50, "#00ff00", mode);
+            assert!(
+                matches!(e, Err(LightingError::InvalidArgument(_))),
+                "{mode:?}: {e:?}"
+            );
+        }
     }
 
     #[test]
     fn logo_line() {
-        let logo = Logo::validate(true, 70, "#FF6600").unwrap();
-        assert_eq!(logo.to_line(), "1 70 ff6600");
+        let logo = Logo::validate(true, 70, "#FF6600", "static").unwrap();
+        assert_eq!(logo.to_line(), "1 70 ff6600 static");
         assert_eq!(
-            Logo::validate(false, 0, "#000000").unwrap().to_line(),
-            "0 0 000000"
+            Logo::validate(false, 0, "#000000", "breathing")
+                .unwrap()
+                .to_line(),
+            "0 0 000000 breathing"
         );
+        for mode in LOGO_MODES {
+            let logo = Logo::validate(true, 100, "#00ff00", mode).unwrap();
+            assert_eq!(logo.to_line(), format!("1 100 00ff00 {mode}"));
+        }
     }
 
     #[test]
@@ -417,7 +458,7 @@ mod tests {
             }
         );
 
-        let logo = apply_logo(&fs, &Logo::validate(true, 70, "#ff6600").unwrap())
+        let logo = apply_logo(&fs, &Logo::validate(true, 70, "#ff6600", "cycle").unwrap())
             .unwrap()
             .unwrap();
         assert_eq!(
@@ -425,10 +466,14 @@ mod tests {
             LogoState {
                 on: true,
                 brightness: 70,
-                color: "#ff6600".into()
+                color: "#ff6600".into(),
+                mode: "cycle".into(),
             }
         );
-        assert_eq!(fs.writes().len(), 2);
+        assert_eq!(
+            fs.writes()[1],
+            (LOGO_FILE.to_owned(), "1 70 ff6600 cycle".to_owned())
+        );
     }
 
     #[test]
@@ -444,7 +489,7 @@ mod tests {
 
     #[test]
     fn a_rejected_write_is_reported() {
-        let fs = FakeFs::new(&[(LOGO_FILE, "0 0 000000")]);
+        let fs = FakeFs::new(&[(LOGO_FILE, "0 0 000000 static")]);
         // available() needs both files; make the keyboard file unwritable.
         fs.set(KEYBOARD_FILE, "wave 5 100 left 000000");
         let fs = fs.with_unwritable(KEYBOARD_FILE);
@@ -456,7 +501,7 @@ mod tests {
     fn read_back_shows_effects_helios_cannot_set() {
         let fs = FakeFs::new(&[
             (KEYBOARD_FILE, "static 0 100 right ff0000"),
-            (LOGO_FILE, "1 80 123456"),
+            (LOGO_FILE, "1 80 123456 unknown"),
         ]);
         assert_eq!(read_keyboard(&fs).unwrap().effect, "static");
         fs.set(KEYBOARD_FILE, "unknown 9 100 unknown 010203");
@@ -472,19 +517,26 @@ mod tests {
             LogoState {
                 on: true,
                 brightness: 80,
-                color: "#123456".into()
+                color: "#123456".into(),
+                mode: "unknown".into(),
             }
         );
+        // A module older than 0.3.0 reads back three words.
+        fs.set(LOGO_FILE, "1 80 123456");
+        assert_eq!(read_logo(&fs), None);
     }
 
     #[test]
     fn saved_state_round_trips() {
         let saved = Saved {
             keyboard: Some(wave()),
-            logo: Some(Logo::validate(true, 100, "#00ff00").unwrap()),
+            logo: Some(Logo::validate(true, 100, "#00ff00", "breathing").unwrap()),
         };
         let text = saved.to_text();
-        assert_eq!(text, "keyboard wave 4 80 right ff8000\nlogo 1 100 00ff00\n");
+        assert_eq!(
+            text,
+            "keyboard wave 4 80 right ff8000\nlogo 1 100 00ff00 breathing\n"
+        );
         assert_eq!(Saved::parse(&text), saved);
         assert!(Saved::parse("").is_empty());
     }
@@ -498,9 +550,16 @@ mod tests {
         assert!(Saved::parse(text).is_empty());
         let text = "logo 2 50 00ff00\nkeyboard wave 4 80 right ff0000 extra\n";
         assert!(Saved::parse(text).is_empty());
+        let text = "logo 1 50 00ff00 rainbow\n";
+        assert!(Saved::parse(text).is_empty());
+        let text = "logo 1 50 00ff00 cycle extra\n";
+        assert!(Saved::parse(text).is_empty());
         let text = "keyboard zoom 1 2 left 0000ff\nlogo 0 0 000000\n";
         let saved = Saved::parse(text);
         assert_eq!(saved.keyboard.unwrap().effect, "zoom");
-        assert!(!saved.logo.unwrap().on);
+        let logo = saved.logo.unwrap();
+        assert!(!logo.on);
+        // Saved before the logo had modes: static.
+        assert_eq!(logo.mode, "static");
     }
 }
