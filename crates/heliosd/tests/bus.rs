@@ -17,6 +17,7 @@ use std::time::{Duration, Instant};
 use async_io::Timer;
 use futures_lite::{StreamExt, future};
 use helios_core::fake::PHN16_72;
+use zbus::object_server::SignalEmitter;
 use zbus::proxy::CacheProperties;
 use zbus::zvariant::OwnedValue;
 use zbus::{Connection, interface};
@@ -26,6 +27,7 @@ const PATH: &str = "/io/github/pauloeduardods/Helios1";
 const SENSORS: &str = "io.github.pauloeduardods.Helios1.Sensors";
 const PROFILE: &str = "io.github.pauloeduardods.Helios1.Profile";
 const DAEMON: &str = "io.github.pauloeduardods.Helios1.Daemon";
+const LIGHTING: &str = "io.github.pauloeduardods.Helios1.Lighting";
 const ERR: &str = "io.github.pauloeduardods.Helios1.Error";
 
 const GPU_STATUS: &str = "sys/bus/pci/devices/0000:01:00.0/power/runtime_status";
@@ -35,6 +37,11 @@ const CPU_TEMP: &str = "sys/class/hwmon/hwmon5/temp1_input";
 const RAPL_ENERGY: &str = "sys/class/powercap/intel-rapl:0/energy_uj";
 const AC_ONLINE: &str = "sys/class/power_supply/ACAD/online";
 const BAT: &str = "sys/class/power_supply/BAT1";
+const KEYBOARD: &str = "sys/bus/wmi/devices/7A4DDFE7-5B5D-40B4-8595-4408E0CC7F56/keyboard_effect";
+const LOGO: &str = "sys/bus/wmi/devices/7A4DDFE7-5B5D-40B4-8595-4408E0CC7F56/logo";
+
+type Keyboard = (String, u32, u32, String, String);
+type Logo = (bool, u32, String);
 
 type Battery = (String, String, f64, f64, f64, i32, i32);
 
@@ -109,6 +116,24 @@ impl FakeAuthority {
     }
 }
 
+/// Stands in for logind, to send PrepareForSleep.
+struct FakeLogind;
+
+#[interface(name = "org.freedesktop.login1.Manager")]
+impl FakeLogind {
+    #[zbus(signal)]
+    async fn prepare_for_sleep(emitter: &SignalEmitter<'_>, start: bool) -> zbus::Result<()>;
+}
+
+/// What the fake system has besides the PHN16-72 sensors.
+#[derive(Default)]
+struct Setup {
+    /// The helios-acer-lighting module's files.
+    lighting: bool,
+    /// The saved lighting state heliosd finds at start.
+    saved: Option<&'static str>,
+}
+
 #[derive(Clone, Copy, PartialEq)]
 enum Polkit {
     Allow,
@@ -118,12 +143,14 @@ enum Polkit {
 
 struct Harness {
     root: PathBuf,
+    state_dir: PathBuf,
     smi_log: PathBuf,
     client: Connection,
     auth_calls: Arc<Mutex<Vec<AuthCall>>>,
     // Field order matters: stop heliosd before its bus, delete files last.
     _heliosd: Reaper,
     _polkit: Option<Connection>,
+    logind: Connection,
     _bus: Reaper,
     _tmp: TempDir,
 }
@@ -138,6 +165,10 @@ impl Drop for TempDir {
 
 impl Harness {
     async fn start(polkit: Polkit) -> Self {
+        Self::start_with(polkit, Setup::default()).await
+    }
+
+    async fn start_with(polkit: Polkit, setup: Setup) -> Self {
         let base = temp_dir();
 
         let root = base.join("root");
@@ -149,6 +180,19 @@ impl Harness {
         // As on a real kernel, both profile files show the same value.
         fs::remove_file(root.join(LEGACY_PROFILE)).unwrap();
         std::os::unix::fs::symlink(root.join(CLASS_PROFILE), root.join(LEGACY_PROFILE)).unwrap();
+
+        if setup.lighting {
+            for (path, value) in [(KEYBOARD, "wave 5 100 left 000000"), (LOGO, "0 0 000000")] {
+                let file = root.join(path);
+                fs::create_dir_all(file.parent().unwrap()).unwrap();
+                fs::write(file, format!("{value}\n")).unwrap();
+            }
+        }
+        let state_dir = base.join("state");
+        fs::create_dir_all(&state_dir).unwrap();
+        if let Some(saved) = setup.saved {
+            fs::write(state_dir.join("lighting"), saved).unwrap();
+        }
 
         let smi_log = base.join("smi.log");
         let smi = base.join("nvidia-smi");
@@ -204,6 +248,14 @@ impl Harness {
             Some(conn)
         };
 
+        let logind = connect().await;
+        logind
+            .object_server()
+            .at("/org/freedesktop/login1", FakeLogind)
+            .await
+            .unwrap();
+        logind.request_name("org.freedesktop.login1").await.unwrap();
+
         let heliosd = Reaper(
             Command::new(env!("CARGO_BIN_EXE_heliosd"))
                 .env("DBUS_SESSION_BUS_ADDRESS", &address)
@@ -212,6 +264,8 @@ impl Harness {
                 .arg(&root)
                 .arg("--nvidia-smi")
                 .arg(&smi)
+                .arg("--state-dir")
+                .arg(&state_dir)
                 .stderr(Stdio::null())
                 .spawn()
                 .unwrap(),
@@ -227,11 +281,13 @@ impl Harness {
 
         Self {
             root,
+            state_dir,
             smi_log,
             client,
             auth_calls,
             _heliosd: heliosd,
             _polkit: polkit_conn,
+            logind,
             _bus: bus,
             _tmp: TempDir(base),
         }
@@ -279,6 +335,68 @@ impl Harness {
             .call("GetHistory", &())
             .await
             .unwrap()
+    }
+
+    /// The D-Bus error name of a failed lighting call, or "ok".
+    fn outcome(result: zbus::Result<Arc<zbus::Message>>) -> String {
+        match result {
+            Ok(_) => "ok".to_owned(),
+            Err(zbus::Error::MethodError(name, _, _)) => name.to_string(),
+            Err(e) => panic!("unexpected error: {e}"),
+        }
+    }
+
+    async fn set_keyboard(
+        &self,
+        effect: &str,
+        speed: u32,
+        brightness: u32,
+        dir: &str,
+        color: &str,
+    ) -> String {
+        let proxy = self.proxy(LIGHTING).await;
+        let body = (effect, speed, brightness, dir, color);
+        Self::outcome(
+            proxy
+                .call_method("SetKeyboardEffect", &body)
+                .await
+                .map(Arc::new),
+        )
+    }
+
+    async fn set_logo(&self, on: bool, brightness: u32, color: &str) -> String {
+        let proxy = self.proxy(LIGHTING).await;
+        Self::outcome(
+            proxy
+                .call_method("SetLogo", &(on, brightness, color))
+                .await
+                .map(Arc::new),
+        )
+    }
+
+    fn saved(&self) -> String {
+        fs::read_to_string(self.state_dir.join("lighting")).unwrap_or_default()
+    }
+
+    /// logind's PrepareForSleep, from its own connection.
+    async fn sleep_signal(&self, start: bool) {
+        let emitter = SignalEmitter::new(&self.logind, "/org/freedesktop/login1").unwrap();
+        FakeLogind::prepare_for_sleep(&emitter, start)
+            .await
+            .unwrap();
+    }
+
+    /// Polls a sysfs file until it holds `want`, for up to 5 s.
+    async fn wait_for_file(&self, path: &str, want: &str) {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while self.read(path) != want {
+            assert!(
+                Instant::now() < deadline,
+                "{path} stayed at {:?}",
+                self.read(path)
+            );
+            Timer::after(Duration::from_millis(20)).await;
+        }
     }
 
     fn read(&self, path: &str) -> String {
@@ -400,7 +518,7 @@ fn properties_reflect_the_sysfs_tree() {
             ]
         );
 
-        assert_eq!(h.get::<u32>(DAEMON, "ApiVersion").await, 5);
+        assert_eq!(h.get::<u32>(DAEMON, "ApiVersion").await, 6);
         assert_eq!(
             h.get::<String>(DAEMON, "Version").await,
             env!("CARGO_PKG_VERSION")
@@ -647,5 +765,244 @@ fn external_profile_changes_are_published() {
         h.wait_for(PROFILE, "Active", |a: &String| a == "performance")
             .await;
         assert!(h.auth_calls().is_empty());
+    });
+}
+
+// ---------------------------------------------------------------- lighting
+
+#[test]
+fn lighting_is_absent_without_the_module() {
+    async_io::block_on(async {
+        let h = Harness::start(Polkit::Allow).await;
+        let introspection: String = h
+            .proxy("org.freedesktop.DBus.Introspectable")
+            .await
+            .call("Introspect", &())
+            .await
+            .unwrap();
+        assert!(introspection.contains(PROFILE));
+        assert!(!introspection.contains(LIGHTING));
+    });
+}
+
+#[test]
+fn lighting_properties_reflect_the_module() {
+    async_io::block_on(async {
+        let h = Harness::start_with(
+            Polkit::Allow,
+            Setup {
+                lighting: true,
+                saved: None,
+            },
+        )
+        .await;
+        let effects: Vec<String> = h.get(LIGHTING, "Effects").await;
+        assert_eq!(effects, ["breathing", "neon", "wave", "shifting", "zoom"]);
+        let directions: Vec<String> = h.get(LIGHTING, "Directions").await;
+        assert_eq!(directions, ["left", "right"]);
+        assert_eq!(
+            h.get::<Keyboard>(LIGHTING, "Keyboard").await,
+            ("wave".into(), 5, 100, "left".into(), "#000000".into())
+        );
+        assert_eq!(
+            h.get::<Logo>(LIGHTING, "Logo").await,
+            (false, 0, "#000000".into())
+        );
+        assert_eq!(h.saved(), "", "nothing saved, nothing restored");
+    });
+}
+
+#[test]
+fn set_keyboard_effect_writes_saves_and_publishes() {
+    async_io::block_on(async {
+        let h = Harness::start_with(
+            Polkit::Allow,
+            Setup {
+                lighting: true,
+                saved: None,
+            },
+        )
+        .await;
+        assert_eq!(
+            h.set_keyboard("zoom", 4, 80, "right", "#FF00ff").await,
+            "ok"
+        );
+        assert_eq!(h.read(KEYBOARD), "zoom 4 80 right ff00ff");
+        assert_eq!(
+            h.get::<Keyboard>(LIGHTING, "Keyboard").await,
+            ("zoom".into(), 4, 80, "right".into(), "#ff00ff".into())
+        );
+        assert_eq!(h.saved(), "keyboard zoom 4 80 right ff00ff\n");
+
+        let caller = h.client.unique_name().unwrap().to_string();
+        assert_eq!(
+            h.auth_calls(),
+            [AuthCall {
+                kind: "system-bus-name".into(),
+                name: caller,
+                action: "io.github.pauloeduardods.helios.set-lighting".into(),
+            }]
+        );
+
+        assert_eq!(h.set_logo(true, 70, "#00ff00").await, "ok");
+        assert_eq!(h.read(LOGO), "1 70 00ff00");
+        assert_eq!(
+            h.get::<Logo>(LIGHTING, "Logo").await,
+            (true, 70, "#00ff00".into())
+        );
+        assert_eq!(
+            h.saved(),
+            "keyboard zoom 4 80 right ff00ff\nlogo 1 70 00ff00\n",
+            "the keyboard part is kept"
+        );
+    });
+}
+
+#[test]
+fn invalid_lighting_requests_never_reach_polkit_or_the_module() {
+    async_io::block_on(async {
+        let h = Harness::start_with(
+            Polkit::Allow,
+            Setup {
+                lighting: true,
+                saved: None,
+            },
+        )
+        .await;
+        let before = h.snapshot();
+        for (effect, speed, brightness, dir, color) in [
+            ("static", 0, 100, "right", "#ff0000"),
+            ("meteor", 4, 80, "right", "#ff0000"),
+            ("wave", 10, 80, "right", "#ff0000"),
+            ("wave", 4, 101, "right", "#ff0000"),
+            ("wave", 4, 80, "up", "#ff0000"),
+            ("wave", 4, 80, "right", "ff000"),
+            ("wave", 4, 80, "right", "#ff0000\n"),
+            ("wave\nneon", 4, 80, "right", "#ff0000"),
+        ] {
+            assert_eq!(
+                h.set_keyboard(effect, speed, brightness, dir, color).await,
+                err("InvalidArgument"),
+                "{effect:?} {speed} {brightness} {dir:?} {color:?}"
+            );
+        }
+        assert_eq!(
+            h.set_logo(true, 101, "#ff0000").await,
+            err("InvalidArgument")
+        );
+        assert_eq!(h.set_logo(true, 50, "green").await, err("InvalidArgument"));
+        assert!(
+            h.auth_calls().is_empty(),
+            "invalid input must never reach polkit"
+        );
+        assert_eq!(h.snapshot(), before, "nothing was written");
+        assert_eq!(h.saved(), "");
+    });
+}
+
+#[test]
+fn lighting_denied_by_polkit_writes_and_saves_nothing() {
+    async_io::block_on(async {
+        let h = Harness::start_with(
+            Polkit::Deny,
+            Setup {
+                lighting: true,
+                saved: None,
+            },
+        )
+        .await;
+        let before = h.snapshot();
+        assert_eq!(
+            h.set_keyboard("wave", 4, 80, "left", "#000000").await,
+            err("NotAuthorized")
+        );
+        assert_eq!(h.set_logo(true, 100, "#ff0000").await, err("NotAuthorized"));
+        assert_eq!(h.snapshot(), before);
+        assert_eq!(h.saved(), "");
+    });
+}
+
+#[test]
+fn saved_lighting_is_restored_at_start() {
+    async_io::block_on(async {
+        let saved = "keyboard breathing 3 60 left 00ffff\nlogo 1 100 ff0000\n";
+        let h = Harness::start_with(
+            Polkit::Allow,
+            Setup {
+                lighting: true,
+                saved: Some(saved),
+            },
+        )
+        .await;
+        // Restored before the name is claimed, so already in place.
+        assert_eq!(h.read(KEYBOARD), "breathing 3 60 left 00ffff");
+        assert_eq!(h.read(LOGO), "1 100 ff0000");
+        assert_eq!(
+            h.get::<Keyboard>(LIGHTING, "Keyboard").await,
+            ("breathing".into(), 3, 60, "left".into(), "#00ffff".into())
+        );
+        assert!(h.auth_calls().is_empty(), "restoring is not a new request");
+    });
+}
+
+#[test]
+fn an_invalid_saved_state_is_never_applied() {
+    async_io::block_on(async {
+        let saved = "keyboard static 0 100 right ff0000\nlogo 1 900 ff0000\n";
+        let h = Harness::start_with(
+            Polkit::Allow,
+            Setup {
+                lighting: true,
+                saved: Some(saved),
+            },
+        )
+        .await;
+        assert_eq!(h.read(KEYBOARD), "wave 5 100 left 000000");
+        assert_eq!(h.read(LOGO), "0 0 000000");
+    });
+}
+
+#[test]
+fn lighting_is_restored_after_resume_from_logind_only() {
+    async_io::block_on(async {
+        let h = Harness::start_with(
+            Polkit::Allow,
+            Setup {
+                lighting: true,
+                saved: None,
+            },
+        )
+        .await;
+        assert_eq!(h.set_keyboard("neon", 2, 90, "left", "#000000").await, "ok");
+        assert_eq!(h.set_logo(true, 40, "#0000ff").await, "ok");
+
+        // The EC forgets during sleep.
+        h.write(KEYBOARD, "wave 5 100 left 000000\n");
+        h.write(LOGO, "0 0 000000\n");
+
+        // Going to sleep, and a forged signal from someone else: ignored.
+        h.sleep_signal(true).await;
+        h.client
+            .emit_signal(
+                None::<()>,
+                "/org/freedesktop/login1",
+                "org.freedesktop.login1.Manager",
+                "PrepareForSleep",
+                &(false,),
+            )
+            .await
+            .unwrap();
+        Timer::after(Duration::from_millis(500)).await;
+        assert_eq!(h.read(KEYBOARD), "wave 5 100 left 000000");
+
+        // Waking up, from logind.
+        h.sleep_signal(false).await;
+        h.wait_for_file(KEYBOARD, "neon 2 90 left 000000").await;
+        h.wait_for_file(LOGO, "1 40 0000ff").await;
+        assert_eq!(
+            h.auth_calls().len(),
+            2,
+            "only the two requests asked polkit"
+        );
     });
 }

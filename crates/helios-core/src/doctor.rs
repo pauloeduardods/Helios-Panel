@@ -35,7 +35,7 @@ const DAEMON_FILES: &[&str] = &[
 pub const LIGHTING_MODULE_VERSION: &str = "0.2.0";
 const LIGHTING_LOADED: &str = "/sys/module/helios_acer_lighting";
 /// The gaming WMI device the module binds to, and the files it adds there.
-const LIGHTING_DEVICE: &str = "/sys/bus/wmi/devices/7A4DDFE7-5B5D-40B4-8595-4408E0CC7F56";
+const LIGHTING_DEVICE: &str = crate::lighting::DEVICE;
 const LIGHTING_ATTRS: &[&str] = &["keyboard_effect", "logo"];
 /// Models in the module's DMI allow-list.
 const LIGHTING_MODELS: &[&str] = &["Predator PHN16-72"];

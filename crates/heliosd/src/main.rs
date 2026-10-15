@@ -2,6 +2,7 @@
 //! heliosd: publishes sensors and the platform profile on the system bus and
 //! performs the only hardware writes Helios allows, behind polkit.
 
+mod lighting;
 mod polkit;
 mod props;
 mod service;
@@ -15,6 +16,7 @@ use async_io::Timer;
 use helios_sys::{NvidiaSmi, RootedFs};
 use zbus::object_server::SignalEmitter;
 
+use crate::lighting::{LightingIface, restore_after_resume, restore_and_emit};
 use crate::service::{
     BUS_NAME, DaemonIface, OBJECT_PATH, PROFILE_IFACE, ProfileIface, SENSORS_IFACE, SensorsIface,
     Shared, emit,
@@ -38,6 +40,7 @@ struct Options {
     bus: Bus,
     sysfs_root: PathBuf,
     nvidia_smi: Option<PathBuf>,
+    state_dir: PathBuf,
     interval: Duration,
 }
 
@@ -51,6 +54,7 @@ fn parse_args(args: impl IntoIterator<Item = String>) -> Result<Parsed, String> 
         bus: Bus::System,
         sysfs_root: PathBuf::from("/"),
         nvidia_smi: None,
+        state_dir: PathBuf::from("/var/lib/heliosd"),
         interval: Duration::from_secs(2),
     };
     let mut args = args.into_iter();
@@ -66,6 +70,7 @@ fn parse_args(args: impl IntoIterator<Item = String>) -> Result<Parsed, String> 
             }
             "--sysfs-root" => options.sysfs_root = value("--sysfs-root")?.into(),
             "--nvidia-smi" => options.nvidia_smi = Some(value("--nvidia-smi")?.into()),
+            "--state-dir" => options.state_dir = value("--state-dir")?.into(),
             "--interval-ms" => {
                 let ms: u64 = value("--interval-ms")?
                     .parse()
@@ -97,7 +102,13 @@ async fn run(options: Options) -> zbus::Result<()> {
         Some(path) => Some(NvidiaSmi::new(path, NvidiaSmi::DEFAULT_TIMEOUT)),
         None => NvidiaSmi::find(),
     };
-    let shared = Shared::new(conn.clone(), RootedFs::new(&options.sysfs_root), smi);
+    let shared = Shared::new(
+        conn.clone(),
+        RootedFs::new(&options.sysfs_root),
+        smi,
+        options.state_dir.clone(),
+    );
+    let emitter = SignalEmitter::new(&conn, OBJECT_PATH)?;
 
     let server = conn.object_server();
     server.at(OBJECT_PATH, DaemonIface).await?;
@@ -107,21 +118,46 @@ async fn run(options: Options) -> zbus::Result<()> {
     server
         .at(OBJECT_PATH, ProfileIface(Arc::clone(&shared)))
         .await?;
+    // Lighting only when the kernel module is bound (checked once: loading
+    // the module later needs a heliosd restart).
+    let lighting = helios_core::lighting::available(&shared.fs);
+    if lighting {
+        restore_and_emit(&shared, &emitter).await?;
+        server
+            .at(OBJECT_PATH, LightingIface(Arc::clone(&shared)))
+            .await?;
+    }
     // Only claim the name once every object is in place.
     conn.request_name(BUS_NAME).await?;
     eprintln!("heliosd {}: serving {BUS_NAME}", env!("CARGO_PKG_VERSION"));
 
-    let emitter = SignalEmitter::new(&conn, OBJECT_PATH)?;
+    let resume = async {
+        if lighting {
+            restore_after_resume(Arc::clone(&shared)).await
+        } else {
+            std::future::pending().await
+        }
+    };
+    let poll = poll_loop(&shared, &emitter, options.interval);
+    futures_lite::future::try_zip(poll, resume).await?;
+    Ok(())
+}
+
+async fn poll_loop(
+    shared: &Arc<Shared>,
+    emitter: &SignalEmitter<'_>,
+    interval: Duration,
+) -> zbus::Result<()> {
     loop {
-        Timer::after(options.interval).await;
+        Timer::after(interval).await;
         let status = blocking::unblock({
-            let shared = Arc::clone(&shared);
+            let shared = Arc::clone(shared);
             move || shared.poll()
         })
         .await;
         let (sensors, profile) = shared.publish(Some((&status).into()), (&status).into());
-        emit(&emitter, SENSORS_IFACE, sensors).await?;
-        emit(&emitter, PROFILE_IFACE, profile).await?;
+        emit(emitter, SENSORS_IFACE, sensors).await?;
+        emit(emitter, PROFILE_IFACE, profile).await?;
     }
 }
 
@@ -165,6 +201,7 @@ mod tests {
                 bus: Bus::System,
                 sysfs_root: PathBuf::from("/"),
                 nvidia_smi: None,
+                state_dir: PathBuf::from("/var/lib/heliosd"),
                 interval: Duration::from_secs(2),
             }
         );
@@ -181,6 +218,8 @@ mod tests {
             "/bin/true",
             "--interval-ms",
             "10",
+            "--state-dir",
+            "/tmp/state",
         ]) else {
             panic!()
         };
@@ -188,6 +227,7 @@ mod tests {
         assert_eq!(o.sysfs_root, PathBuf::from("/tmp/x"));
         assert_eq!(o.nvidia_smi, Some(PathBuf::from("/bin/true")));
         assert_eq!(o.interval, Duration::from_millis(50), "clamped");
+        assert_eq!(o.state_dir, PathBuf::from("/tmp/state"));
     }
 
     #[test]

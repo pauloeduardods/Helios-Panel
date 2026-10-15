@@ -7,7 +7,7 @@
 > and the lid logo work. The **static** keyboard effect (one fixed colour,
 > or four zone colours) leaves the keyboard dark on this machine and is
 > left out until it is understood ([results](#hardware-test-results)). The
-> heliosd interface and the extension section come next.
+> heliosd interface (step 2) is done; the extension section comes next.
 
 ## Summary
 
@@ -271,28 +271,11 @@ way on the next boot.
 
 ## heliosd: the `Lighting` interface
 
-`io.github.pauloeduardods.Helios1.Lighting` is exported only when the
-module's sysfs files exist.
-
-| Member | Type | Meaning |
-|---|---|---|
-| `Capabilities` | `a{sv}` | `effects` `as`, `speed` `(uu)` (0, 9), `brightness` `(uu)` (0, 100), `directions` `as`, `logo` `b` |
-| `Keyboard` | `a{sv}` | current state, read back from the module: `effect`, `speed`, `brightness`, `direction`, `color` |
-| `Logo` | `a{sv}` | `on`, `brightness`, `color` |
-| `SetKeyboardEffect(s effect, u speed, u brightness, s direction, s color)` | method | one effect and colour for the whole keyboard (`color` is `#rrggbb`) |
-| `SetLogo(b on, u brightness, s color)` | method | the lid logo |
-
-The order of checks is the same as `SetProfile`: validate first (an invalid
-argument never reaches polkit), then polkit
-**`io.github.pauloeduardods.helios.set-lighting`** (`allow_active=yes`,
-`allow_inactive=no`, `allow_any=no`: the worst case is a wrong colour), then
-one serialized write to the module, then read back and emit
-`PropertiesChanged`.
-
-The EC is expected to lose these settings on power-off (PredatorSense
-re-applies them at login). heliosd saves the last applied state in its
-`StateDirectory` (`/var/lib/heliosd`) and re-applies it when it starts and
-after resume (logind `PrepareForSleep(false)`).
+Done; see [ARCHITECTURE.md](ARCHITECTURE.md#iogithubpauloeduardodshelios1lighting)
+for the members. It is exported only when the module is bound, writes go
+through polkit `io.github.pauloeduardods.helios.set-lighting`, and the last
+applied state is saved in `/var/lib/heliosd/lighting` and re-applied when
+heliosd starts and after a resume.
 
 ## Extension
 

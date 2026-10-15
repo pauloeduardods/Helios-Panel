@@ -2,8 +2,8 @@
 
 > **Status:** helios-core, heliosctl, heliosd, the D-Bus extension and the
 > installer and `heliosctl doctor` are implemented. Lighting is in
-> progress: the kernel module is done, the heliosd interface and the
-> extension are next (see the [migration plan](#migration-plan)).
+> progress: the kernel module and the heliosd interface are done, the
+> extension section is next (see the [migration plan](#migration-plan)).
 
 ## Goals and scope
 
@@ -184,7 +184,7 @@ All properties are read-only and emit `org.freedesktop.DBus.Properties.Propertie
 | Member | Type | Meaning |
 |---|---|---|
 | `Version` | `s` | heliosd version, e.g. `0.2.0` |
-| `ApiVersion` | `u` | `5`; raised for compatible additions (2 added `GpuPower`, `PowerSource`, `Battery`; 3 added `CpuPower`; 4 added `CpuUsage`, `CpuFrequency`, `GpuUsage`, `Devices`; 5 added `GetHistory`) |
+| `ApiVersion` | `u` | `6`; raised for compatible additions (2 added `GpuPower`, `PowerSource`, `Battery`; 3 added `CpuPower`; 4 added `CpuUsage`, `CpuFrequency`, `GpuUsage`, `Devices`; 5 added `GetHistory`; 6 added the `Lighting` interface) |
 
 ### `io.github.pauloeduardods.Helios1.Sensors`
 
@@ -227,18 +227,27 @@ result is `WriteFailed`.
 The mode key and power-profiles-daemon can also change the profile. heliosd
 picks the change up on its next tick and emits `Active`.
 
-### `io.github.pauloeduardods.Helios1.Lighting` (provisional, task 7)
+### `io.github.pauloeduardods.Helios1.Lighting`
 
-Reserved. The members are fixed only after the task 7 research and your
-approval. The intended shape, with every argument validated against `Capabilities`:
+Exported only when the `helios-acer-lighting` kernel module is bound (checked
+when heliosd starts). Details and the hardware results are in
+[LIGHTING.md](LIGHTING.md).
 
 | Member | Type | Meaning |
 |---|---|---|
-| `Capabilities` | `a{sv}` | targets, zones, effects, ranges; empty when unsupported |
-| `SetKeyboard(aay colors, s effect, u brightness, u speed, s direction)` | method | polkit `io.github.pauloeduardods.helios.set-lighting` |
-| `SetLogo(ay color, b on, u brightness)` | method | same action |
+| `Effects` | `as` | the keyboard effects that can be set: `breathing`, `neon`, `wave`, `shifting`, `zoom` (static is not offered, see LIGHTING.md) |
+| `Directions` | `as` | `left`, `right` |
+| `Keyboard` | `(suuss)` | effect, speed 0–9, brightness 0–100, direction, `#rrggbb`, as the module reads it back (the effect may be one Helios cannot set) |
+| `Logo` | `(bus)` | on, brightness 0–100, `#rrggbb` |
+| `SetKeyboardEffect(s effect, u speed, u brightness, s direction, s color)` | method | polkit `io.github.pauloeduardods.helios.set-lighting` |
+| `SetLogo(b on, u brightness, s color)` | method | same action |
 
-The interface is only exported when a supported lighting device exists.
+As with `SetProfile`: validate (an invalid argument never reaches polkit),
+polkit, one serialized write, read back, `PropertiesChanged`. The last applied
+keyboard effect and logo are saved in `/var/lib/heliosd/lighting` and
+re-applied when heliosd starts and when logind reports a resume
+(`PrepareForSleep(false)`, matched on logind's bus name so no other client
+can trigger it). A saved line that does not validate is never applied.
 
 ### Errors
 
@@ -250,7 +259,7 @@ The interface is only exported when a supported lighting device exists.
 | Action | `allow_any` | `allow_inactive` | `allow_active` | Why |
 |---|---|---|---|---|
 | `io.github.pauloeduardods.helios.set-profile` | `no` | `no` | `yes` | the mode key already does it without a password; worst case is a loud fan |
-| `io.github.pauloeduardods.helios.set-lighting` (task 7, not shipped yet) | `no` | `no` | `yes` | worst case is a wrong color |
+| `io.github.pauloeduardods.helios.set-lighting` | `no` | `no` | `yes` | worst case is a wrong colour |
 
 heliosd calls `CheckAuthorization` with the caller as a `system-bus-name`
 subject and `AllowUserInteraction`, so an administrator can tighten either
@@ -260,7 +269,7 @@ change. Reads need no authorization.
 ### D-Bus policy
 
 Only root may own `io.github.pauloeduardods.Helios1`. Anyone may call the
-`Daemon`, `Sensors` and `Profile` interfaces (task 7 adds `Lighting`) and the
+`Daemon`, `Sensors`, `Profile` and `Lighting` interfaces and the
 standard ones. polkit, not the bus policy, decides on writes. Everything else is
 denied.
 
@@ -297,10 +306,13 @@ ProtectClock=yes
 ProtectHostname=yes
 ProtectProc=invisible
 ProcSubset=all
-# ... except the platform profile (legacy path + class device)
+# ... except the platform profile (legacy path + class device), the two
+# files of the lighting module and the saved lighting state
 ReadWritePaths=-/sys/firmware/acpi/platform_profile
 ReadWritePaths=-/sys/devices/platform/acer-wmi/platform-profile
-# task 7 adds the lighting device here and nothing else
+ReadWritePaths=-/sys/bus/wmi/devices/7A4DDFE7-5B5D-40B4-8595-4408E0CC7F56/keyboard_effect
+ReadWritePaths=-/sys/bus/wmi/devices/7A4DDFE7-5B5D-40B4-8595-4408E0CC7F56/logo
+StateDirectory=heliosd
 
 # devices: only what nvidia-smi needs to read a temperature
 DevicePolicy=closed
@@ -507,7 +519,7 @@ that uninstall leaves the tree byte-for-byte as it was.
 | 5 | `heliosctl doctor` (done) |
 | 6 | `install.sh` for extension + daemon, manifest-based `--uninstall` (done, before task 5) |
 | 7 | lighting research and API proposal (plan only): [LIGHTING.md](LIGHTING.md) (done) |
-| 8 | lighting, step 1: the `helios-acer-lighting` kernel module and the `doctor` check (done); step 2: heliosd `Lighting` interface; step 3: extension section |
+| 8 | lighting, step 1: the `helios-acer-lighting` kernel module and the `doctor` check (done); step 2: heliosd `Lighting` interface (done); step 3: extension section |
 
 ## Decisions
 

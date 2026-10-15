@@ -7,6 +7,7 @@ use zbus::proxy;
 use zbus::zvariant::Value;
 
 pub const SET_PROFILE_ACTION: &str = "io.github.pauloeduardods.helios.set-profile";
+pub const SET_LIGHTING_ACTION: &str = "io.github.pauloeduardods.helios.set-lighting";
 
 /// Lets the agent prompt when an administrator configured `auth_*` for the action.
 const ALLOW_USER_INTERACTION: u32 = 1;

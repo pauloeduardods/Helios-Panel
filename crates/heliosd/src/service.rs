@@ -3,6 +3,7 @@
 
 use std::borrow::Cow;
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
@@ -18,6 +19,7 @@ use zbus::names::InterfaceName;
 use zbus::object_server::SignalEmitter;
 use zbus::{Connection, interface};
 
+use crate::lighting::LightingProps;
 use crate::polkit::{self, SET_PROFILE_ACTION};
 use crate::props::{
     self, Battery, Changes, Cpu, CpuFrequency, CpuPower, Device, Fan, Gpu, GpuPower, ProfileProps,
@@ -30,8 +32,8 @@ pub const SENSORS_IFACE: &str = "io.github.pauloeduardods.Helios1.Sensors";
 pub const PROFILE_IFACE: &str = "io.github.pauloeduardods.Helios1.Profile";
 /// 2 added GpuPower, PowerSource and Battery to Sensors; 3 added CpuPower;
 /// 4 added CpuUsage, CpuFrequency, GpuUsage and Devices; 5 added the
-/// GetHistory method.
-pub const API_VERSION: u32 = 5;
+/// GetHistory method; 6 added the Lighting interface.
+pub const API_VERSION: u32 = 6;
 
 /// Firmware profile switches are not instant; do not hammer the EC.
 const MIN_WRITE_GAP: Duration = Duration::from_millis(250);
@@ -59,24 +61,32 @@ impl From<ProfileError> for HeliosError {
 
 /// Everything the interfaces share.
 pub struct Shared {
-    fs: RootedFs,
+    pub(crate) fs: RootedFs,
     smi: Option<NvidiaSmi>,
     clock: SystemClock,
     monitor: Mutex<Monitor>,
     history: Mutex<History>,
     published: Mutex<(SensorsProps, ProfileProps)>,
+    pub(crate) lighting: Mutex<LightingProps>,
+    /// Where the lighting state is saved (/var/lib/heliosd).
+    pub(crate) state_dir: PathBuf,
     /// Serializes hardware writes and remembers when the last one happened.
-    write_lock: async_lock::Mutex<Option<Instant>>,
-    conn: Connection,
+    pub(crate) write_lock: async_lock::Mutex<Option<Instant>>,
+    pub(crate) conn: Connection,
 }
 
-fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
+pub(crate) fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     // A panic while holding the lock leaves plain data behind; keep serving.
     m.lock().unwrap_or_else(|e| e.into_inner())
 }
 
 impl Shared {
-    pub fn new(conn: Connection, fs: RootedFs, smi: Option<NvidiaSmi>) -> Arc<Self> {
+    pub fn new(
+        conn: Connection,
+        fs: RootedFs,
+        smi: Option<NvidiaSmi>,
+        state_dir: PathBuf,
+    ) -> Arc<Self> {
         let clock = SystemClock::new();
         let mut monitor = Monitor::new(&fs);
         let first = monitor.poll(&fs, smi.as_ref().map(|s| s as &dyn GpuQuery), &clock);
@@ -86,6 +96,8 @@ impl Shared {
             history: Mutex::new(history),
             published: Mutex::new(((&first).into(), (&first).into())),
             monitor: Mutex::new(monitor),
+            lighting: Mutex::new(LightingProps::default()),
+            state_dir,
             fs,
             smi,
             clock,
@@ -321,6 +333,8 @@ impl ProfileIface {
 mod tests {
     //! The files in data/ must agree with the code and keep the sandbox tight.
     use super::*;
+    use crate::lighting::LIGHTING_IFACE;
+    use crate::polkit::SET_LIGHTING_ACTION;
 
     const UNIT: &str = include_str!("../../../data/heliosd.service");
     const ACTIVATION: &str = include_str!("../../../data/io.github.pauloeduardods.Helios1.service");
@@ -342,6 +356,7 @@ mod tests {
         for iface in [
             SENSORS_IFACE,
             PROFILE_IFACE,
+            LIGHTING_IFACE,
             "io.github.pauloeduardods.Helios1.Daemon",
         ] {
             assert!(
@@ -350,6 +365,7 @@ mod tests {
             );
         }
         assert!(POLKIT.contains(&format!("<action id=\"{SET_PROFILE_ACTION}\">")));
+        assert!(POLKIT.contains(&format!("<action id=\"{SET_LIGHTING_ACTION}\">")));
     }
 
     #[test]
@@ -377,14 +393,18 @@ mod tests {
     }
 
     #[test]
-    fn unit_can_write_only_the_platform_profile() {
+    fn unit_can_write_only_the_profile_lighting_and_its_state() {
         assert_eq!(
             unit_values("ReadWritePaths"),
             [
                 "-/sys/firmware/acpi/platform_profile",
                 "-/sys/devices/platform/acer-wmi/platform-profile",
+                &format!("-{}", helios_core::lighting::KEYBOARD_FILE),
+                &format!("-{}", helios_core::lighting::LOGO_FILE),
             ]
         );
+        assert_eq!(unit_values("StateDirectory"), ["heliosd"]);
+        assert_eq!(unit_values("StateDirectoryMode"), ["0700"]);
         assert_eq!(
             unit_values("DeviceAllow"),
             ["char-nvidia rw", "char-nvidiactl rw"]
@@ -397,9 +417,21 @@ mod tests {
         assert!(POLKIT.contains("<allow_inactive>no</allow_inactive>"));
         assert!(POLKIT.contains("<allow_active>yes</allow_active>"));
         assert_eq!(
+            POLKIT.matches("<allow_active>yes</allow_active>").count(),
             POLKIT.matches("<action id=").count(),
-            1,
-            "one action per method"
+            "every action has the same defaults"
+        );
+        assert_eq!(POLKIT.matches("<allow_any>no</allow_any>").count(), 2);
+        assert_eq!(
+            POLKIT
+                .matches("<allow_inactive>no</allow_inactive>")
+                .count(),
+            2
+        );
+        assert_eq!(
+            POLKIT.matches("<action id=").count(),
+            2,
+            "one action per kind of write"
         );
     }
 }
