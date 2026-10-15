@@ -8,6 +8,8 @@
 
 /* Method 20 byte 9 selects the target. Only the keyboard is ever sent. */
 #define TARGET_KEYBOARD 1
+/* Read only: the logo (LB) target of method 21. */
+#define TARGET_LOGO 2
 /*
  * Method 20 byte 8, stored by the firmware as KLES. The ACPI code only
  * stores it, but the static effect stays dark unless it is 3, the value the
@@ -238,14 +240,19 @@ static int set_effect(const struct hal_fw *fw, u8 effect, u8 speed, u8 brightnes
 	return set(fw, HAL_SET_EFFECT, in, sizeof(in));
 }
 
-static int get_effect(const struct hal_fw *fw, u8 *out)
+static int get_target_effect(const struct hal_fw *fw, u8 target, u8 *out)
 {
-	u8 in[HAL_GET_EFFECT_IN] = { TARGET_KEYBOARD, 0, 0, 0 };
+	u8 in[HAL_GET_EFFECT_IN] = { target, 0, 0, 0 };
 	int ret = fw->call(fw->ctx, HAL_GET_EFFECT, in, sizeof(in), out, HAL_GET_EFFECT_OUT);
 
 	if (ret)
 		return ret;
 	return out[0] == 0 ? 0 : -EIO;
+}
+
+static int get_effect(const struct hal_fw *fw, u8 *out)
+{
+	return get_target_effect(fw, TARGET_KEYBOARD, out);
 }
 
 /* Method 4 only reads; @selector picks which register. */
@@ -278,6 +285,20 @@ int hal_effect_store(const struct hal_fw *fw, const char *buf, size_t len)
 	return set_effect(fw, effect, speed, brightness, direction, c);
 }
 
+/* "<effect> <speed> <brightness> <direction> <rrggbb>" from a method 21 reply. */
+static void put_effect(struct line *l, const u8 *out)
+{
+	put_name(l, effects, ARRAY_SIZE(effects), out[1]);
+	put_str(l, " ");
+	put_uint(l, out[2]);
+	put_str(l, " ");
+	put_uint(l, out[3]);
+	put_str(l, " ");
+	put_name(l, directions, ARRAY_SIZE(directions), out[5]);
+	put_str(l, " ");
+	put_rgb(l, out + 6);
+}
+
 int hal_effect_show(const struct hal_fw *fw, char *buf)
 {
 	u8 out[HAL_GET_EFFECT_OUT] = { 0 };
@@ -286,15 +307,7 @@ int hal_effect_show(const struct hal_fw *fw, char *buf)
 
 	if (ret)
 		return ret;
-	put_name(&l, effects, ARRAY_SIZE(effects), out[1]);
-	put_str(&l, " ");
-	put_uint(&l, out[2]);
-	put_str(&l, " ");
-	put_uint(&l, out[3]);
-	put_str(&l, " ");
-	put_name(&l, directions, ARRAY_SIZE(directions), out[5]);
-	put_str(&l, " ");
-	put_rgb(&l, out + 6);
+	put_effect(&l, out);
 	return finish(&l);
 }
 
@@ -324,6 +337,8 @@ int hal_zones_store(const struct hal_fw *fw, const char *buf, size_t len)
 
 	for (i = 0; i < HAL_ZONES; i++) {
 		u8 in[HAL_SET_ZONE_IN] = { 0 };
+
+		fw->pause(fw->ctx);
 
 		in[0] = (u8)(1u << i);
 		in[1] = c[i].r;
@@ -366,6 +381,7 @@ int hal_state_show(const struct hal_fw *fw, char *buf)
 	u8 keyboard[HAL_GET_STATE_OUT] = { 0 };
 	u8 logo[HAL_GET_STATE_OUT] = { 0 };
 	u8 effect[HAL_GET_EFFECT_OUT] = { 0 };
+	u8 logo_effect[HAL_GET_EFFECT_OUT] = { 0 };
 	struct line l = { buf, 0 };
 	int ret;
 
@@ -374,6 +390,8 @@ int hal_state_show(const struct hal_fw *fw, char *buf)
 		ret = get_state(fw, STATE_LOGO, logo);
 	if (!ret)
 		ret = get_effect(fw, effect);
+	if (!ret)
+		ret = get_target_effect(fw, TARGET_LOGO, logo_effect);
 	if (ret)
 		return ret;
 	put_str(&l, "kbst=");
@@ -382,6 +400,8 @@ int hal_state_show(const struct hal_fw *fw, char *buf)
 	put_hex(&l, logo[6]);
 	put_str(&l, " kles=");
 	put_hex(&l, effect[9]);
+	put_str(&l, " logo=");
+	put_effect(&l, logo_effect);
 	return finish(&l);
 }
 

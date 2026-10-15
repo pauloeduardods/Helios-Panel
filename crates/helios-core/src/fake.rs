@@ -156,7 +156,7 @@ pub const PHN16_72_SYSTEM: &[(&str, &str)] = &[
         "<policyconfig/>",
     ),
     ("/proc/sys/kernel/osrelease", "7.0.0-38-generic"),
-    ("/sys/module/helios_acer_lighting/version", "0.1.3"),
+    ("/sys/module/helios_acer_lighting/version", "0.1.4"),
     (
         "/sys/bus/wmi/devices/7A4DDFE7-5B5D-40B4-8595-4408E0CC7F56/keyboard_effect",
         "static 0 100 right ffffff",

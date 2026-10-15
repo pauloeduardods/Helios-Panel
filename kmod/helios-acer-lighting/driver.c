@@ -16,6 +16,7 @@
  * attributes call it. See docs/LIGHTING.md for the protocol.
  */
 #include <linux/acpi.h>
+#include <linux/delay.h>
 #include <linux/device.h>
 #include <linux/dmi.h>
 #include <linux/module.h>
@@ -27,6 +28,8 @@
 #include "lighting.h"
 
 #define ACER_GAMING_WMI_GUID "7A4DDFE7-5B5D-40B4-8595-4408E0CC7F56"
+/* Time the EC needs to apply one lighting write before the next. */
+#define EC_SETTLE_MS 100
 
 struct helios_lighting {
 	struct wmi_device *wdev;
@@ -80,6 +83,11 @@ static int wmi_call(void *ctx, enum hal_method method, const u8 *in, size_t in_l
 	}
 	kfree(obj);
 	return ret;
+}
+
+static void ec_pause(void *ctx)
+{
+	msleep(EC_SETTLE_MS);
 }
 
 static ssize_t store(struct device *dev, const char *buf, size_t count,
@@ -179,6 +187,7 @@ static int helios_lighting_probe(struct wmi_device *wdev, const void *context)
 	mutex_init(&hl->lock);
 	hl->wdev = wdev;
 	hl->fw.call = wmi_call;
+	hl->fw.pause = ec_pause;
 	hl->fw.ctx = hl;
 	dev_set_drvdata(&wdev->dev, hl);
 	return 0;
@@ -203,4 +212,4 @@ module_wmi_driver(helios_lighting_driver);
 MODULE_AUTHOR("Helios Panel contributors");
 MODULE_DESCRIPTION("Keyboard RGB for Acer Predator laptops (Helios Panel)");
 MODULE_LICENSE("GPL");
-MODULE_VERSION("0.1.3");
+MODULE_VERSION("0.1.4");

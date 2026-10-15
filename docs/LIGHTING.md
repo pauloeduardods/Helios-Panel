@@ -230,8 +230,8 @@ commands, adapted to what is missing):
 
 ```bash
 sudo apt install dkms linux-headers-$(uname -r)   # if not installed yet
-sudo cp -rT kmod/helios-acer-lighting /usr/src/helios-acer-lighting-0.1.3
-sudo dkms install helios-acer-lighting/0.1.3
+sudo cp -rT kmod/helios-acer-lighting /usr/src/helios-acer-lighting-0.1.4
+sudo dkms install helios-acer-lighting/0.1.4
 ```
 
 Then, with Secure Boot **off**, or **on with the DKMS key already
@@ -380,6 +380,17 @@ attributes for the next test, through method 2 with exactly two selectors:
 `logo_state` writes `LBST` = `0xF0` or `0xF1` (selector `0x10`, byte 6,
 then the seven `0xFF` bytes the firmware requires). Selector `0x01`, the
 turbo-key LED, is never sent; the tests check every method 2 call.
+
+With `KBST = 1` the static effect **lit, but only zone 1**: it showed its
+new colour and dimmed at brightness 30, while zones 2 to 4 stayed dark.
+Every zone register read back correctly, so the EC seems to drop writes
+that land while it is still applying the previous one. Writing
+`LBST = 0xF1` did not light the logo.
+
+Module 0.1.4 waits 100 ms before each zone write, and adds the logo's
+effect (method 21, target 2, read only) to `lighting_state`, to see whether
+the logo has a zero brightness. Writing the logo's effect (method 20,
+target 2) is still impossible in the module.
 
 ## Safety summary
 

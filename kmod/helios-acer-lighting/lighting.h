@@ -54,7 +54,7 @@ enum hal_method {
 #define HAL_MAX_SPEED 9
 #define HAL_MAX_BRIGHTNESS 100
 /* Longest line the attributes accept or produce, newline included. */
-#define HAL_LINE_MAX 64
+#define HAL_LINE_MAX 96
 
 /*
  * Calls one firmware method. @out_len is the exact output size expected.
@@ -64,6 +64,11 @@ enum hal_method {
 struct hal_fw {
 	int (*call)(void *ctx, enum hal_method method, const u8 *in, size_t in_len,
 		    u8 *out, size_t out_len);
+	/*
+	 * Waits between two writes of one operation. The EC applies a write
+	 * some time after it lands; back-to-back zone writes are lost.
+	 */
+	void (*pause)(void *ctx);
 	void *ctx;
 };
 
@@ -77,8 +82,10 @@ int hal_effect_store(const struct hal_fw *fw, const char *buf, size_t len);
 int hal_effect_show(const struct hal_fw *fw, char *buf);
 
 /*
- * lighting_state (read-only diagnostics): "kbst=0xNN lbst=0xNN kles=0xNN",
- * the EC's keyboard state, logo state and method 20 byte 8 as stored.
+ * lighting_state (read-only diagnostics):
+ * "kbst=0xNN lbst=0xNN kles=0xNN logo=<effect> <speed> <brightness> <direction> <rrggbb>",
+ * the EC's keyboard state, logo state, method 20 byte 8 as stored, and the
+ * logo's effect (method 21, target 2).
  */
 int hal_state_show(const struct hal_fw *fw, char *buf);
 

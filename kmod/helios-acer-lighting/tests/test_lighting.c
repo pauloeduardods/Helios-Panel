@@ -16,6 +16,7 @@
 
 struct call {
 	enum hal_method method;
+	size_t pauses_before;	/* pauses since the previous call */
 	u8 in[16];
 	size_t in_len;
 };
@@ -25,9 +26,11 @@ struct fake {
 	size_t count;
 	int fail_at;		/* 1-based call number that fails; 0: never */
 	int fail_with;		/* errno to return, or 0 for a bad status byte */
+	size_t pending_pauses;
 	u8 effect[HAL_GET_EFFECT_OUT];
 	u8 zones[HAL_ZONES][3];
 	u8 kbst, lbst;
+	u8 logo_effect[HAL_GET_EFFECT_OUT];
 };
 
 static int fake_call(void *ctx, enum hal_method method, const u8 *in, size_t in_len,
@@ -42,6 +45,8 @@ static int fake_call(void *ctx, enum hal_method method, const u8 *in, size_t in_
 	}
 	c = &f->calls[f->count++];
 	c->method = method;
+	c->pauses_before = f->pending_pauses;
+	f->pending_pauses = 0;
 	c->in_len = in_len;
 	memcpy(c->in, in, in_len < sizeof(c->in) ? in_len : sizeof(c->in));
 
@@ -54,7 +59,7 @@ static int fake_call(void *ctx, enum hal_method method, const u8 *in, size_t in_
 	}
 	switch (method) {
 	case HAL_GET_EFFECT:
-		memcpy(out, f->effect, out_len);
+		memcpy(out, in[0] == 2 ? f->logo_effect : f->effect, out_len);
 		break;
 	case HAL_GET_STATE:
 		if (in[0] == 0x08)
@@ -75,8 +80,13 @@ static int fake_call(void *ctx, enum hal_method method, const u8 *in, size_t in_
 	return 0;
 }
 
+static void fake_pause(void *ctx)
+{
+	((struct fake *)ctx)->pending_pauses++;
+}
+
 static struct fake fake;
-static struct hal_fw fw = { fake_call, &fake };
+static struct hal_fw fw = { fake_call, fake_pause, &fake };
 
 static void reset(void)
 {
@@ -151,7 +161,8 @@ static void check_invariants(void)
 				CHECK(c->in[b] == 0, "method 6 byte %d is %u", b, c->in[b]);
 			break;
 		case HAL_GET_EFFECT:
-			CHECK(c->in_len == HAL_GET_EFFECT_IN && c->in[0] == 1 && c->in[1] == 0 &&
+			CHECK(c->in_len == HAL_GET_EFFECT_IN && (c->in[0] == 1 || c->in[0] == 2) &&
+			      c->in[1] == 0 &&
 			      c->in[2] == 0 && c->in[3] == 0, "method 21 input");
 			break;
 		case HAL_GET_ZONE:
@@ -360,7 +371,11 @@ static void test_zones_bytes(void)
 	for (int z = 0; z < 4; z++) {
 		CHECK(fake.calls[1 + z].method == HAL_SET_ZONE, "call %d is method 6", 2 + z);
 		check_bytes(&fake.calls[1 + z], zone[z], 8, "zone");
+		CHECK(fake.calls[1 + z].pauses_before == 1, "zone %d: %zu pauses before it",
+		      z + 1, fake.calls[1 + z].pauses_before);
 	}
+	CHECK(fake.calls[0].pauses_before == 0, "pause before the first call");
+	CHECK(fake.pending_pauses == 0, "pause after the last call");
 	check_invariants();
 }
 
@@ -426,10 +441,15 @@ static void test_state_show(void)
 	fake.kbst = 0x01;
 	fake.lbst = 0xf4;
 	fake.effect[9] = 3;
+	const u8 logo[16] = { 0, 1, 9, 100, 0xff, 2, 0xff, 0xff, 0xff, 0 };
+
+	memcpy(fake.logo_effect, logo, sizeof(logo));
 	int n = hal_state_show(&fw, buf);
 
-	CHECK(n > 0 && !strcmp(buf, "kbst=0x01 lbst=0xf4 kles=0x03\n"), "show gave \"%s\"", buf);
-	CHECK(fake.count == 3, "%zu calls, want 3", fake.count);
+	CHECK(n > 0 && !strcmp(buf, "kbst=0x01 lbst=0xf4 kles=0x03 logo=breathing 9 100 right ffffff\n"),
+	      "show gave \"%s\"", buf);
+	CHECK(fake.count == 4, "%zu calls, want 4", fake.count);
+	CHECK(fake.calls[3].method == HAL_GET_EFFECT && fake.calls[3].in[0] == 2, "logo read");
 	CHECK(fake.calls[0].method == HAL_GET_STATE && fake.calls[0].in[0] == 0x08, "KBST read");
 	CHECK(fake.calls[1].method == HAL_GET_STATE && fake.calls[1].in[0] == 0x10, "LBST read");
 	CHECK(fake.calls[2].method == HAL_GET_EFFECT, "KLES read");
