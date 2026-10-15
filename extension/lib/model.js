@@ -476,6 +476,29 @@ export function powerPanelText(power) {
     }
 }
 
+/** The title of the collapsed Usage menu: "Usage · CPU 23% · GPU 4%". */
+export function usageSummary(usage) {
+    const parts = ['Usage'];
+    if (usage.cpu !== null)
+        parts.push(`CPU ${formatPercent(usage.cpu)}`);
+    if (usage.gpu !== null)
+        parts.push(`GPU ${formatPercent(usage.gpu)}`);
+    return parts.join(' · ');
+}
+
+/** The title of the collapsed Power menu: "Power · AC · 80%" or "Power · 64% · 18.2 W". */
+export function powerSummary(power) {
+    const parts = ['Power'];
+    const battery = power.battery;
+    if (power.source === 'ac')
+        parts.push('AC');
+    if (battery?.percent !== null && battery?.percent !== undefined)
+        parts.push(`${Math.round(battery.percent)}%`);
+    if (power.source === 'battery' && battery?.watts !== null && battery?.watts !== undefined)
+        parts.push(formatWatts(battery.watts));
+    return parts.join(' · ');
+}
+
 export function profileFromDbus({Available, Active, Choices, Driver} = {}) {
     return {
         available: Available === true,
