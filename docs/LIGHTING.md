@@ -107,7 +107,7 @@ the firmware's own ASL.
 
 | Method | What the firmware does | Why it is excluded |
 |---|---|---|
-| 2 | turbo-key LED (`TKST`), keyboard on/off (`KBST`), `LB` state (`LBST`) | it overlaps with the turbo key; not needed |
+| 2 | turbo-key LED (`TKST`), keyboard on/off (`KBST`), `LB` state (`LBST`) | it overlaps with the turbo key; not needed (its read-only counterpart, method 4, is used for diagnosis) |
 | 10–13 | other `LB*` fields (`LBET`, `LBLR/G/B`, `LBLT`, `LBLF`) of unknown meaning | unknown semantics |
 | 14, 16, 22 and the others | fans, misc settings | out of scope: never fans, never the EC beyond lighting |
 
@@ -230,8 +230,8 @@ commands, adapted to what is missing):
 
 ```bash
 sudo apt install dkms linux-headers-$(uname -r)   # if not installed yet
-sudo cp -rT kmod/helios-acer-lighting /usr/src/helios-acer-lighting-0.1.1
-sudo dkms install helios-acer-lighting/0.1.1
+sudo cp -rT kmod/helios-acer-lighting /usr/src/helios-acer-lighting-0.1.2
+sudo dkms install helios-acer-lighting/0.1.2
 ```
 
 Then, with Secure Boot **off**, or **on with the DKMS key already
@@ -357,9 +357,16 @@ Every write was read back exactly, so the EC stored what was sent; only the
 static effect did not light. The only differences from Linuwu-Sense's
 static sequence, which is reported working on this model, were byte 8 (0
 instead of 3), the direction bytes (`8, 0` "keep" instead of `0, 0`) and a
-colour in the static call. Module 0.1.1 matches that sequence. The steps
-above are repeated with it, the zones several times in a row with different
-brightness levels.
+colour in the static call. Module 0.1.1 matched that sequence: the static
+effect **still stayed dark** (zones four times in a row, and a static
+`keyboard_effect`), so byte 8 alone is not the cause. Pressing keys or the
+keyboard-light key did not light it either.
+
+Module 0.1.2 adds a read-only `lighting_state` attribute for diagnosis. It
+reads, through method 4 (which only reads EC registers, see the ASL), the
+keyboard state `KBST` and the logo state `LBST`, plus `KLES` from method 21:
+`kbst=0xNN lbst=0xNN kles=0xNN`. Method 2, which writes `KBST`, `LBST` and
+the turbo-key LED, is still never called.
 
 ## Safety summary
 

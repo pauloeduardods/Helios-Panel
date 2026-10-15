@@ -7,6 +7,7 @@
  *
  *   keyboard_effect  "<effect> <speed> <brightness> <direction> <rrggbb>"
  *   keyboard_zones   "<brightness> <rrggbb> <rrggbb> <rrggbb> <rrggbb>"
+ *   lighting_state   read-only diagnostics: "kbst=0xNN lbst=0xNN kles=0xNN"
  *
  * It only binds on the machines in the DMI allow-list below. Nothing is
  * sent to the firmware at load time; only reads and writes of the
@@ -53,6 +54,7 @@ static int wmi_call(void *ctx, enum hal_method method, const u8 *in, size_t in_l
 	int ret = -EIO;
 
 	switch (method) {
+	case HAL_GET_STATE:
 	case HAL_SET_ZONE:
 	case HAL_GET_ZONE:
 	case HAL_SET_EFFECT:
@@ -126,12 +128,20 @@ static ssize_t keyboard_zones_show(struct device *dev, struct device_attribute *
 	return show(dev, buf, hal_zones_show);
 }
 
+static ssize_t lighting_state_show(struct device *dev, struct device_attribute *attr,
+				   char *buf)
+{
+	return show(dev, buf, hal_state_show);
+}
+
 static DEVICE_ATTR_ADMIN_RW(keyboard_effect);
 static DEVICE_ATTR_ADMIN_RW(keyboard_zones);
+static DEVICE_ATTR_ADMIN_RO(lighting_state);
 
 static struct attribute *helios_lighting_attrs[] = {
 	&dev_attr_keyboard_effect.attr,
 	&dev_attr_keyboard_zones.attr,
+	&dev_attr_lighting_state.attr,
 	NULL
 };
 ATTRIBUTE_GROUPS(helios_lighting);
@@ -174,4 +184,4 @@ module_wmi_driver(helios_lighting_driver);
 MODULE_AUTHOR("Helios Panel contributors");
 MODULE_DESCRIPTION("Keyboard RGB for Acer Predator laptops (Helios Panel)");
 MODULE_LICENSE("GPL");
-MODULE_VERSION("0.1.1");
+MODULE_VERSION("0.1.2");

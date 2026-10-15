@@ -27,6 +27,7 @@ struct fake {
 	int fail_with;		/* errno to return, or 0 for a bad status byte */
 	u8 effect[HAL_GET_EFFECT_OUT];
 	u8 zones[HAL_ZONES][3];
+	u8 kbst, lbst;
 };
 
 static int fake_call(void *ctx, enum hal_method method, const u8 *in, size_t in_len,
@@ -54,6 +55,14 @@ static int fake_call(void *ctx, enum hal_method method, const u8 *in, size_t in_
 	switch (method) {
 	case HAL_GET_EFFECT:
 		memcpy(out, f->effect, out_len);
+		break;
+	case HAL_GET_STATE:
+		if (in[0] == 0x08)
+			out[5] = f->kbst;
+		else if (in[0] == 0x10)
+			out[6] = f->lbst;
+		else
+			out[0] = 1;
 		break;
 	case HAL_GET_ZONE:
 		for (int z = 0; z < HAL_ZONES; z++)
@@ -148,6 +157,13 @@ static void check_invariants(void)
 		case HAL_GET_ZONE:
 			CHECK(c->in_len == HAL_GET_ZONE_IN && c->in[1] == 0 && c->in[2] == 0 &&
 			      c->in[3] == 0, "method 7 input");
+			break;
+		case HAL_GET_STATE:
+			CHECK(c->in_len == HAL_GET_STATE_IN, "method 4 size");
+			CHECK(c->in[0] == 0x08 || c->in[0] == 0x10, "method 4 selector 0x%02x",
+			      c->in[0]);
+			for (int b = 1; b < 8; b++)
+				CHECK(c->in[b] == 0, "method 4 byte %d is %u", b, c->in[b]);
 			break;
 		default:
 			fail("method %d called", c->method);
@@ -381,6 +397,31 @@ static void test_zones_show(void)
 	CHECK(hal_zones_show(&fw, buf) == -EIO, "bad zone status not reported");
 }
 
+/* ------------------------------------------------------------- lighting_state */
+
+static void test_state_show(void)
+{
+	char buf[HAL_LINE_MAX];
+
+	reset();
+	fake.kbst = 0x01;
+	fake.lbst = 0xf4;
+	fake.effect[9] = 3;
+	int n = hal_state_show(&fw, buf);
+
+	CHECK(n > 0 && !strcmp(buf, "kbst=0x01 lbst=0xf4 kles=0x03\n"), "show gave \"%s\"", buf);
+	CHECK(fake.count == 3, "%zu calls, want 3", fake.count);
+	CHECK(fake.calls[0].method == HAL_GET_STATE && fake.calls[0].in[0] == 0x08, "KBST read");
+	CHECK(fake.calls[1].method == HAL_GET_STATE && fake.calls[1].in[0] == 0x10, "LBST read");
+	CHECK(fake.calls[2].method == HAL_GET_EFFECT, "KLES read");
+	check_invariants();
+
+	reset();
+	fake.fail_at = 2;
+	CHECK(hal_state_show(&fw, buf) == -EIO, "bad status not reported");
+	CHECK(fake.count == 2, "kept reading after a failure");
+}
+
 /* --------------------------------------------------------------- fuzzing */
 
 /*
@@ -433,6 +474,7 @@ int main(void)
 		{ "zones rejects", test_zones_rejects },
 		{ "zones stop at first error", test_zones_stop_at_first_error },
 		{ "zones show", test_zones_show },
+		{ "state show", test_state_show },
 		{ "fuzz", test_fuzz },
 	};
 	size_t n = ARRAY_SIZE(tests);

@@ -14,6 +14,9 @@
  * community driver tested on this model sends (docs/LIGHTING.md).
  */
 #define STORED_STATE 3
+/* Method 4 selectors: the keyboard state (KBST) and the logo state (LBST). */
+#define STATE_KEYBOARD 0x08
+#define STATE_LOGO 0x10
 
 /* Indexed by the firmware's effect number. */
 static const char *const effects[] = {
@@ -181,6 +184,17 @@ static void put_rgb(struct line *l, const u8 *rgb)
 	}
 }
 
+static void put_hex(struct line *l, u8 value)
+{
+	static const char hex[] = "0123456789abcdef";
+
+	put_str(l, "0x");
+	if (l->len < HAL_LINE_MAX - 2) {
+		l->buf[l->len++] = hex[value >> 4];
+		l->buf[l->len++] = hex[value & 0xf];
+	}
+}
+
 static void put_name(struct line *l, const char *const *names, size_t n, u8 value)
 {
 	put_str(l, value < n && names[value] ? names[value] : "unknown");
@@ -228,6 +242,17 @@ static int get_effect(const struct hal_fw *fw, u8 *out)
 {
 	u8 in[HAL_GET_EFFECT_IN] = { TARGET_KEYBOARD, 0, 0, 0 };
 	int ret = fw->call(fw->ctx, HAL_GET_EFFECT, in, sizeof(in), out, HAL_GET_EFFECT_OUT);
+
+	if (ret)
+		return ret;
+	return out[0] == 0 ? 0 : -EIO;
+}
+
+/* Method 4 only reads; @selector picks which register. */
+static int get_state(const struct hal_fw *fw, u8 selector, u8 *out)
+{
+	u8 in[HAL_GET_STATE_IN] = { selector, 0, 0, 0, 0, 0, 0, 0 };
+	int ret = fw->call(fw->ctx, HAL_GET_STATE, in, sizeof(in), out, HAL_GET_STATE_OUT);
 
 	if (ret)
 		return ret;
@@ -333,5 +358,29 @@ int hal_zones_show(const struct hal_fw *fw, char *buf)
 		put_str(&l, " ");
 		put_rgb(&l, out + 1);
 	}
+	return finish(&l);
+}
+
+int hal_state_show(const struct hal_fw *fw, char *buf)
+{
+	u8 keyboard[HAL_GET_STATE_OUT] = { 0 };
+	u8 logo[HAL_GET_STATE_OUT] = { 0 };
+	u8 effect[HAL_GET_EFFECT_OUT] = { 0 };
+	struct line l = { buf, 0 };
+	int ret;
+
+	ret = get_state(fw, STATE_KEYBOARD, keyboard);
+	if (!ret)
+		ret = get_state(fw, STATE_LOGO, logo);
+	if (!ret)
+		ret = get_effect(fw, effect);
+	if (ret)
+		return ret;
+	put_str(&l, "kbst=");
+	put_hex(&l, keyboard[5]);
+	put_str(&l, " lbst=");
+	put_hex(&l, logo[6]);
+	put_str(&l, " kles=");
+	put_hex(&l, effect[9]);
 	return finish(&l);
 }

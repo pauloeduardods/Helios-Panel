@@ -28,6 +28,7 @@ typedef uint8_t u8;
  * settings, the turbo-key LED) are deliberately not listed.
  */
 enum hal_method {
+	HAL_GET_STATE = 4,	/* read-only: keyboard and logo state registers */
 	HAL_SET_ZONE = 6,	/* one zone's static colour */
 	HAL_GET_ZONE = 7,	/* read one zone's colour */
 	HAL_SET_EFFECT = 20,	/* effect, speed, brightness, direction, colour */
@@ -35,6 +36,8 @@ enum hal_method {
 };
 
 /* Exact input and output sizes, from the firmware's buffers. */
+#define HAL_GET_STATE_IN 8
+#define HAL_GET_STATE_OUT 16
 #define HAL_SET_ZONE_IN 8
 #define HAL_SET_ZONE_OUT 4
 #define HAL_GET_ZONE_IN 4
@@ -69,6 +72,12 @@ struct hal_fw {
  */
 int hal_effect_store(const struct hal_fw *fw, const char *buf, size_t len);
 int hal_effect_show(const struct hal_fw *fw, char *buf);
+
+/*
+ * lighting_state (read-only diagnostics): "kbst=0xNN lbst=0xNN kles=0xNN",
+ * the EC's keyboard state, logo state and method 20 byte 8 as stored.
+ */
+int hal_state_show(const struct hal_fw *fw, char *buf);
 
 /* keyboard_zones: "<brightness> <rrggbb> <rrggbb> <rrggbb> <rrggbb>". */
 int hal_zones_store(const struct hal_fw *fw, const char *buf, size_t len);
