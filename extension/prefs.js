@@ -8,6 +8,7 @@ import Gtk from 'gi://Gtk';
 import {ExtensionPreferences} from 'resource:///org/gnome/Shell/Extensions/js/extensions/prefs.js';
 
 import {BUS_NAME, OBJECT_PATH} from './lib/client.js';
+import {alertsPage} from './lib/prefs/alerts.js';
 import {
     PANEL_ITEMS, moveItem, normalizeOrder, profileFromDbus, sensorsFromDbus,
 } from './lib/model.js';
@@ -20,6 +21,7 @@ export default class HeliosPanelPreferences extends ExtensionPreferences {
         window.add(this._graphPage(settings));
         window.add(this._temperaturePage(settings));
         window.add(this._sensorPage(settings));
+        window.add(alertsPage(settings));
     }
 
     // ------------------------------------------------------------ pages

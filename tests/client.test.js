@@ -204,3 +204,22 @@ test('an older heliosd without GetHistory starts with an empty history', async (
     assert.equal(client.state, 'running');
     assert.deepEqual(client.historyView().ages, []);
 });
+
+test('history: false skips GetHistory and keeps no samples, but still reports changes', async () => {
+    globalThis.FAKE_NOW_S = 1000;
+    globalThis.FAKE_BUS.replies = {GetHistory: [[0], [['cpu-celsius', [true], [60]]]]};
+    let changes = 0;
+    const client = new HeliosClient(() => changes++, {history: false});
+    globalThis.FAKE_BUS.appear();
+    await tick();
+    await tick();
+    assert.equal(client.state, 'running');
+    assert.deepEqual(globalThis.FAKE_BUS.calls, []);
+
+    const before = changes;
+    globalThis.FAKE_BUS.props[`${IFACE}.Sensors`].Cpu = ['hwmon:coretemp/Package id 0', true, 65];
+    globalThis.FAKE_BUS.proxies[`${IFACE}.Sensors`].emit('g-properties-changed');
+    assert.equal(changes, before + 1);
+    assert.equal(client.snapshot().sensors.cpu.celsius, 65);
+    assert.deepEqual(client.historyView().ages, []);
+});
