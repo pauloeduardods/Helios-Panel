@@ -45,7 +45,11 @@ GNOME Shell keeps the extension code it loaded at login, so a new version only s
 - **X11:** press **Alt+F2**, type `r` and press Enter. Only gnome-shell restarts; your windows, terminals and running programs stay open. No logout needed.
 - **Wayland:** log out and back in (the shell cannot restart in place).
 
-To configure it, open the extension menu → **Settings**, or run `gnome-extensions prefs helios-panel@paulo`.
+To configure it, open the extension menu → **Settings**, or run `gnome-extensions prefs helios-panel@paulo`. You can:
+
+- choose what the top bar shows (CPU and GPU temperature and usage, fans, power draw, profile) and **reorder** it;
+- add a **graph** of the last 1, 2 or 5 minutes next to any reading, or show the graph alone; pick its width, a line or a filled area, and whether it follows the temperature colors or uses one fixed color;
+- set the **warm and hot thresholds** and their colors. The numbers and the graphs change color when a reading crosses them.
 
 To remove everything:
 
@@ -86,7 +90,7 @@ What goes where:
 
 Reading never needs root, with one exception: the RAPL counter behind the CPU draw is root-only. heliosd already runs as root and owns the file, so it needs no extra privilege, and it publishes that draw only as an average over at least 2 seconds rounded to 0.1 W (see below). `heliosctl status` run as a normal user shows no CPU draw. heliosd reads everything once every 2 seconds for all clients, and clients are told only when something changes.
 
-heliosd also keeps the last 5 minutes of CPU and GPU temperature, CPU and GPU usage, the CPU draw and the battery draw in memory (150 samples each, never written to disk). The menu draws them as small graphs under each value. It asks heliosd for them only while the menu is open.
+heliosd also keeps the last 5 minutes of CPU and GPU temperature, CPU and GPU usage, the CPU draw and the battery draw in memory (150 samples each, never written to disk). The menu draws them as small graphs under each value, and the top bar can too (see below). The extension asks heliosd for them once when it connects and then adds the values heliosd already sends, so the graphs cost no extra calls.
 
 ### Why the CPU draw is coarse
 

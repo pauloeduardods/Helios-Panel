@@ -149,14 +149,82 @@ const SPARKLINE_MIN_RANGE = Object.freeze({
     'battery-watts': 5,
 });
 
+/** The series heliosd keeps, in its order. */
+export const HISTORY_SERIES = Object.freeze([
+    'cpu-celsius', 'gpu-celsius', 'cpu-usage', 'gpu-usage', 'cpu-watts', 'battery-watts',
+]);
+
+/** heliosd keeps 150 samples; so does the local copy. */
+const HISTORY_CAPACITY = 150;
+
 /**
- * Polylines for one series in a width × height box (y grows down): the
- * newest sample on the right edge, the span's start on the left, one run of
- * [x, y] points per stretch without gaps. Empty when there is no reading.
+ * The extension's copy of the history: loaded once from GetHistory, then
+ * kept up to date from the values heliosd already sends, so the graphs
+ * cost no extra D-Bus calls. Times are monotonic seconds.
  */
-export function sparklineSegments(history, name, width, height) {
+export class HistoryBuffer {
+    constructor() {
+        this.clear();
+    }
+
+    clear() {
+        this.times = [];
+        this.series = Object.fromEntries(HISTORY_SERIES.map(name => [name, []]));
+    }
+
+    /** Replaces everything with a GetHistory reply received at `now`. */
+    load(reply, now) {
+        const {ages, series} = historyFromDbus(reply);
+        this.times = ages.map(age => now - age);
+        for (const name of HISTORY_SERIES)
+            this.series[name] = series[name] ?? this.times.map(() => null);
+    }
+
+    /** Adds one sample: `values` maps a series name to a reading or null. */
+    push(now, values) {
+        this.times.push(now);
+        for (const name of HISTORY_SERIES)
+            this.series[name].push(values[name] ?? null);
+        const drop = this.times.findIndex(t => now - t <= HISTORY_SPAN_S);
+        const excess = Math.max(this.times.length - HISTORY_CAPACITY, drop < 0 ? this.times.length : drop);
+        if (excess > 0) {
+            this.times.splice(0, excess);
+            for (const name of HISTORY_SERIES)
+                this.series[name].splice(0, excess);
+        }
+    }
+
+    /** {ages, series} as of `now`, the shape the sparklines draw. */
+    view(now) {
+        return {ages: this.times.map(t => now - t), series: this.series};
+    }
+}
+
+/** One history sample from a client snapshot. */
+export function historySample({sensors, usage, power}) {
+    const battery = power.battery;
+    return {
+        'cpu-celsius': sensors.cpu.celsius,
+        'gpu-celsius': sensors.gpu.celsius,
+        'cpu-usage': usage.cpu,
+        'gpu-usage': usage.gpu,
+        'cpu-watts': power.cpuWatts,
+        'battery-watts': battery?.state === 'discharging' ? battery.watts : null,
+    };
+}
+
+/**
+ * Pieces of a sparkline in a width × height box (y grows down): the newest
+ * sample at the right edge, `windowS` seconds ago at the left. A piece is a
+ * run of [x, y] points without gaps and with one `level` (from `levelOf`,
+ * applied to the value each step ends on), so a line can change color where
+ * the reading crosses a threshold. Empty when there is nothing to draw.
+ */
+export function sparklinePieces(history, name, width, height,
+    {windowS = HISTORY_SPAN_S, levelOf = () => Level.NORMAL} = {}) {
     const values = history?.series[name] ?? [];
-    const known = values.filter(v => v !== null);
+    const inWindow = i => history.ages[i] <= windowS;
+    const known = values.filter((v, i) => v !== null && inWindow(i));
     if (known.length === 0)
         return [];
     let low = Math.min(...known);
@@ -171,23 +239,102 @@ export function sparklineSegments(history, name, width, height) {
     const y = v => (high > low
         ? pad + (1 - (v - low) / (high - low)) * (height - 2 * pad)
         : height / 2);
-    const x = age => (1 - Math.min(age, HISTORY_SPAN_S) / HISTORY_SPAN_S) * width;
+    const x = age => (1 - Math.min(age, windowS) / windowS) * width;
 
-    const segments = [];
+    const runs = [];
     let run = [];
     values.forEach((v, i) => {
+        if (!inWindow(i))
+            return;
         if (v === null) {
             if (run.length)
-                segments.push(run);
+                runs.push(run);
             run = [];
         } else {
-            run.push([x(history.ages[i]), y(v)]);
+            run.push({point: [x(history.ages[i]), y(v)], level: levelOf(v)});
         }
     });
     if (run.length)
-        segments.push(run);
-    return segments;
+        runs.push(run);
+
+    const pieces = [];
+    for (const r of runs) {
+        if (r.length === 1) {
+            pieces.push({points: [r[0].point], level: r[0].level});
+            continue;
+        }
+        let piece = {points: [r[0].point], level: r[1].level};
+        for (let i = 1; i < r.length; i++) {
+            if (r[i].level !== piece.level) {
+                pieces.push(piece);
+                piece = {points: [r[i - 1].point], level: r[i].level};
+            }
+            piece.points.push(r[i].point);
+        }
+        pieces.push(piece);
+    }
+    return pieces;
 }
+
+/** The point runs of a single-color sparkline over the whole span. */
+export function sparklineSegments(history, name, width, height) {
+    return sparklinePieces(history, name, width, height).map(p => p.points);
+}
+
+// ---- panel layout -----------------------------------------------------------
+
+/**
+ * Everything the top bar can show, in the default order. `series` is the
+ * history a segment can draw as a graph; `show` its on/off setting.
+ */
+export const PANEL_ITEMS = Object.freeze([
+    {id: 'cpu', label: 'CPU temperature', show: 'show-cpu', series: 'cpu-celsius'},
+    {id: 'gpu', label: 'GPU temperature', show: 'show-gpu', series: 'gpu-celsius'},
+    {id: 'cpu-usage', label: 'CPU usage', show: 'show-cpu-usage', series: 'cpu-usage'},
+    {id: 'gpu-usage', label: 'GPU usage', show: 'show-gpu-usage', series: 'gpu-usage'},
+    {id: 'fan', label: 'Fan speed', show: 'show-fans', series: null},
+    {id: 'power', label: 'Power draw', show: 'show-power', series: 'battery-watts'},
+    {id: 'profile', label: 'Power profile', show: 'show-profile', series: null},
+]);
+
+/** Every known item once, in the stored order, unknown ids dropped, new ones last. */
+export function normalizeOrder(stored) {
+    const ids = PANEL_ITEMS.map(item => item.id);
+    const kept = [...new Set(stored ?? [])].filter(id => ids.includes(id));
+    return [...kept, ...ids.filter(id => !kept.includes(id))];
+}
+
+/** `order` with `id` moved by `delta` places (clamped). */
+export function moveItem(order, id, delta) {
+    const out = normalizeOrder(order);
+    const from = out.indexOf(id);
+    if (from < 0)
+        return out;
+    const to = Math.max(0, Math.min(out.length - 1, from + delta));
+    out.splice(to, 0, ...out.splice(from, 1));
+    return out;
+}
+
+/**
+ * A color setting ("#rgb", "#rrggbb", "rgb(…)", "rgba(…)") as [r, g, b] in
+ * 0–1 for Cairo; null when empty or unreadable (use the theme color).
+ */
+export function parseColor(text) {
+    const value = (text ?? '').trim().toLowerCase();
+    let m = value.match(/^#([0-9a-f]{3})$/);
+    if (m)
+        return [...m[1]].map(c => parseInt(c + c, 16) / 255);
+    m = value.match(/^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/);
+    if (m)
+        return m.slice(1).map(h => parseInt(h, 16) / 255);
+    m = value.match(/^rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*(,[^)]*)?\)$/);
+    if (m)
+        return m.slice(1, 4).map(n => Math.min(255, Number(n)) / 255);
+    return null;
+}
+
+/** Bar graph widths in pixels. */
+export const GRAPH_WIDTHS = Object.freeze({narrow: 30, medium: 45, wide: 70});
 
 export function formatPercent(percent) {
     if (percent === null || percent === undefined || !Number.isFinite(percent))

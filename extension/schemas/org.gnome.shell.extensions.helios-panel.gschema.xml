@@ -10,6 +10,8 @@
     <key name="show-profile" type="b"><default>true</default><summary>Show power profile</summary></key>
     <key name="show-icons" type="b"><default>true</default><summary>Show icons</summary></key>
     <key name="show-unit" type="b"><default>false</default><summary>Show "°C" instead of "°"</summary></key>
+    <key name="show-cpu-usage" type="b"><default>false</default><summary>Show CPU usage</summary></key>
+    <key name="show-gpu-usage" type="b"><default>false</default><summary>Show GPU usage</summary></key>
     <key name="hide-gpu-when-off" type="b"><default>false</default><summary>Hide the GPU when it is off</summary></key>
 
     <key name="profile-names" type="s">
@@ -18,6 +20,33 @@
       <summary>Profile names</summary>
     </key>
     <key name="color-profile" type="b"><default>true</default><summary>Color the profile by power level</summary></key>
+
+    <!-- Order of the top-bar items (ids from PANEL_ITEMS in lib/model.js) -->
+    <key name="panel-order" type="as">
+      <default>['cpu', 'gpu', 'cpu-usage', 'gpu-usage', 'fan', 'power', 'profile']</default>
+      <summary>Order of the items in the top bar</summary>
+    </key>
+
+    <!-- Graphs in the top bar -->
+    <key name="graph-items" type="as"><default>[]</default><summary>Items that show a graph in the top bar</summary></key>
+    <key name="graph-only" type="as"><default>[]</default><summary>Items that show only their graph, without the number</summary></key>
+    <key name="graph-window" type="i"><range min="60" max="300"/><default>120</default><summary>Seconds a top-bar graph spans</summary></key>
+    <key name="graph-width" type="s">
+      <choices><choice value="narrow"/><choice value="medium"/><choice value="wide"/></choices>
+      <default>'medium'</default>
+      <summary>Width of a top-bar graph</summary>
+    </key>
+    <key name="graph-style" type="s">
+      <choices><choice value="line"/><choice value="area"/></choices>
+      <default>'line'</default>
+      <summary>Line or filled area</summary>
+    </key>
+    <key name="graph-color-mode" type="s">
+      <choices><choice value="follow"/><choice value="fixed"/></choices>
+      <default>'follow'</default>
+      <summary>Graph color: follow the temperature colors, or one fixed color</summary>
+    </key>
+    <key name="graph-color" type="s"><default>'#62a0ea'</default><summary>Fixed graph color</summary></key>
 
     <!-- Placement -->
     <key name="panel-position" type="s">

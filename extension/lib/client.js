@@ -1,14 +1,16 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // HeliosClient: the extension's only link to the hardware. It watches
 // heliosd on the system bus, keeps proxies for its interfaces and reports
-// one of three states: 'connecting', 'running' or 'not-running'.
+// one of three states: 'connecting', 'running' or 'not-running'. It also
+// keeps the recent history: one GetHistory call on connect, then every
+// Sensors update is appended.
 // No timers, no sysfs, no subprocesses, never root.
 
 import GLib from 'gi://GLib';
 import Gio from 'gi://Gio';
 
 import {
-    historyFromDbus, powerFromDbus, profileFromDbus, sensorsFromDbus, usageFromDbus,
+    HistoryBuffer, historySample, powerFromDbus, profileFromDbus, sensorsFromDbus, usageFromDbus,
 } from './model.js';
 
 export const BUS_NAME = 'io.github.pauloeduardods.Helios1';
@@ -80,6 +82,11 @@ function newProxy(connection, name, cancellable) {
     });
 }
 
+/** Monotonic seconds. */
+function now() {
+    return GLib.get_monotonic_time() / 1e6;
+}
+
 function cachedProps(proxy, names) {
     const out = {};
     for (const name of names)
@@ -112,6 +119,7 @@ export class HeliosClient {
         this._proxies = null;
         this._signalIds = [];
         this._generation = 0;
+        this._history = new HistoryBuffer();
         this._cancellable = new Gio.Cancellable();
         this._watchId = Gio.bus_watch_name(
             Gio.BusType.SYSTEM, BUS_NAME, Gio.BusNameWatcherFlags.AUTO_START,
@@ -161,19 +169,24 @@ export class HeliosClient {
         }
     }
 
+    /** The recent history as {ages, series} (see HistoryBuffer.view). */
+    historyView() {
+        return this._history.view(now());
+    }
+
     /**
-     * The last five minutes (see historyFromDbus), or null when heliosd is
-     * not running, is older than API v5, or the call failed.
+     * Fills the history from heliosd. An older heliosd (before API v5) has
+     * no GetHistory: the history then starts empty and grows from here.
      */
-    async history() {
-        const proxy = this._proxies?.sensors;
-        if (!proxy)
-            return null;
+    async _loadHistory(proxy, generation) {
         try {
             const reply = await this._call(proxy, 'GetHistory', null, HISTORY_TIMEOUT_MS);
-            return historyFromDbus(reply?.deepUnpack());
+            if (generation === this._generation) {
+                this._history.load(reply?.deepUnpack(), now());
+                this._onChange();
+            }
         } catch {
-            return null;
+            // Keep what was appended meanwhile.
         }
     }
 
@@ -186,11 +199,17 @@ export class HeliosClient {
                 return; // vanished or destroyed meanwhile
             this._dropProxies();
             this._proxies = Object.fromEntries(entries);
-            for (const proxy of Object.values(this._proxies)) {
-                const id = proxy.connect('g-properties-changed', () => this._onChange());
+            for (const [key, proxy] of Object.entries(this._proxies)) {
+                const id = proxy.connect('g-properties-changed', () => {
+                    if (key === 'sensors')
+                        this._history.push(now(), historySample(this.snapshot()));
+                    this._onChange();
+                });
                 this._signalIds.push([proxy, id]);
             }
+            this._history.clear();
             this._setState('running');
+            this._loadHistory(this._proxies.sensors, generation);
         } catch (e) {
             if (generation !== this._generation)
                 return;
@@ -202,6 +221,7 @@ export class HeliosClient {
 
     _onVanished() {
         this._generation++;
+        this._history.clear();
         this._dropProxies();
         this._setState('not-running');
     }

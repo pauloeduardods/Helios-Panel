@@ -184,7 +184,7 @@ All properties are read-only and emit `org.freedesktop.DBus.Properties.Propertie
 | Member | Type | Meaning |
 |---|---|---|
 | `Version` | `s` | heliosd version, e.g. `0.2.0` |
-| `ApiVersion` | `u` | `4`; raised for compatible additions (2 added `GpuPower`, `PowerSource`, `Battery`; 3 added `CpuPower`; 4 added `CpuUsage`, `CpuFrequency`, `GpuUsage`, `Devices`; 5 added `GetHistory`) |
+| `ApiVersion` | `u` | `5`; raised for compatible additions (2 added `GpuPower`, `PowerSource`, `Battery`; 3 added `CpuPower`; 4 added `CpuUsage`, `CpuFrequency`, `GpuUsage`, `Devices`; 5 added `GetHistory`) |
 
 ### `io.github.pauloeduardods.Helios1.Sensors`
 
@@ -202,7 +202,7 @@ All properties are read-only and emit `org.freedesktop.DBus.Properties.Propertie
 | `Devices` | `a(ssd)` | drives and network cards: (kind `storage`/`wifi`, name, °C), sorted by kind then name; a drive's name is its model, so two `nvme` chips are told apart; unreadable sensors are left out |
 | `PowerSource` | `s` | `ac`, `battery` or `unknown` (no system `Mains` supply and the battery is not discharging) |
 | `Battery` | `(ssdddii)` | (name, state `charging`/`discharging`/`full`/`not-charging`/`unknown`, %, W, health %, cycles, minutes left); name `""` = no battery, `-1` = unknown |
-| `GetHistory()` | method → `(ad, a(sabad))` | the last 5 minutes from memory (150 polls at most): ages in seconds before now, oldest first; then per series (name, valid flags, values) aligned with them. Series: `cpu-celsius`, `gpu-celsius`, `cpu-usage`, `gpu-usage`, `cpu-watts`, `battery-watts` (only while discharging). The extension calls it only while its menu is open. |
+| `GetHistory()` | method → `(ad, a(sabad))` | the last 5 minutes from memory (150 polls at most): ages in seconds before now, oldest first; then per series (name, valid flags, values) aligned with them. Series: `cpu-celsius`, `gpu-celsius`, `cpu-usage`, `gpu-usage`, `cpu-watts`, `battery-watts` (only while discharging). The extension calls it once per connection and then appends each `Sensors` update to its own copy, which the menu and top-bar graphs draw. |
 
 The `valid` flag replaces NaN sentinels, so every frontend, including JSON-based
 ones, gets an explicit "no value".

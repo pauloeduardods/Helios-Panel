@@ -6,7 +6,8 @@ import {
     Level, batteryStateLabel, daemonMessage, formatClock, formatDuration, formatPercent, formatRpm,
     formatTemp, formatWatts, pickCpu, pickGpu, powerFromDbus, powerPanelText, profileColor,
     profileFromDbus, profileLabel, sanitizeThresholds, sensorsFromDbus, setProfileError, tempLevel,
-    usageFromDbus, historyFromDbus, sparklineSegments,
+    usageFromDbus, historyFromDbus, sparklineSegments, sparklinePieces, HistoryBuffer,
+    historySample, normalizeOrder, moveItem, PANEL_ITEMS, parseColor,
 } from '../extension/lib/model.js';
 
 // What heliosd publishes on a PHN16-72 with the NVIDIA GPU asleep.
@@ -206,4 +207,76 @@ test('sparklines span the window, split at gaps and never exaggerate noise', () 
     assert.ok(flat.every(y => Math.abs(y - 11) < 0.5), String(flat));
     assert.deepEqual(sparklineSegments(history, 'gpu-celsius', 100, 22), []);
     assert.deepEqual(sparklineSegments(null, 'cpu-usage', 100, 22), []);
+});
+
+test('the local history loads GetHistory, then grows and trims to five minutes', () => {
+    const h = new HistoryBuffer();
+    h.load([[4, 2], [['cpu-celsius', [true, true], [60, 61]]]], 1000);
+    assert.deepEqual(h.view(1000).ages, [4, 2]);
+    assert.deepEqual(h.series['cpu-celsius'], [60, 61]);
+    assert.deepEqual(h.series['gpu-usage'], [null, null], 'series heliosd did not send are empty');
+
+    h.push(1002, {'cpu-celsius': 62, 'gpu-usage': 5});
+    assert.deepEqual(h.view(1002).ages, [6, 4, 0]);
+    assert.deepEqual(h.series['cpu-celsius'], [60, 61, 62]);
+    assert.deepEqual(h.series['gpu-usage'], [null, null, 5]);
+
+    h.push(1300, {'cpu-celsius': 70});
+    assert.deepEqual(h.view(1300).ages, [298, 0], 'older than 300 s is dropped');
+    assert.deepEqual(h.series['cpu-celsius'], [62, 70]);
+
+    for (let t = 1302; t < 1302 + 2 * 200; t += 2)
+        h.push(t, {});
+    assert.equal(h.times.length, 150, 'never more than heliosd keeps');
+});
+
+test('a history sample takes the battery draw only while discharging', () => {
+    const snapshot = discharging => ({
+        sensors: {cpu: {celsius: 61}, gpu: {celsius: null}},
+        usage: {cpu: 23, gpu: null},
+        power: {cpuWatts: 12.3, battery: {state: discharging ? 'discharging' : 'charging', watts: 24.5}},
+    });
+    assert.deepEqual(historySample(snapshot(true)), {
+        'cpu-celsius': 61, 'gpu-celsius': null, 'cpu-usage': 23, 'gpu-usage': null,
+        'cpu-watts': 12.3, 'battery-watts': 24.5,
+    });
+    assert.equal(historySample(snapshot(false))['battery-watts'], null);
+});
+
+test('sparkline pieces change color where the reading crosses a threshold', () => {
+    const history = {ages: [6, 4, 2, 0], series: {'cpu-celsius': [70, 80, 95, 96]}};
+    const levelOf = v => (v >= 90 ? 'hot' : 'normal');
+    const pieces = sparklinePieces(history, 'cpu-celsius', 60, 20, {windowS: 6, levelOf});
+    assert.deepEqual(pieces.map(p => [p.level, p.points.map(([x]) => Math.round(x))]), [
+        ['normal', [0, 20]],
+        ['hot', [20, 40, 60]],
+    ]);
+});
+
+test('sparkline pieces only draw what is inside the window', () => {
+    const history = {ages: [200, 60, 0], series: {'cpu-usage': [100, 0, 50]}};
+    const pieces = sparklinePieces(history, 'cpu-usage', 100, 22, {windowS: 60});
+    assert.deepEqual(pieces[0].points.map(([x]) => x), [0, 100]);
+    assert.deepEqual(pieces[0].points.map(([, y]) => y), [21, 1], 'scaled to the visible 0–50');
+});
+
+test('the panel order keeps every item once', () => {
+    const ids = PANEL_ITEMS.map(i => i.id);
+    assert.deepEqual(normalizeOrder(undefined), ids);
+    assert.deepEqual(normalizeOrder(['profile', 'bogus', 'profile', 'cpu']),
+        ['profile', 'cpu', ...ids.filter(id => id !== 'profile' && id !== 'cpu')]);
+    assert.deepEqual(moveItem(ids, 'gpu', -1).slice(0, 2), ['gpu', 'cpu']);
+    assert.deepEqual(moveItem(ids, 'cpu', -1), ids, 'already first');
+    assert.deepEqual(moveItem(ids, 'profile', 5), ids, 'already last');
+    assert.deepEqual(moveItem(ids, 'nope', 1), ids);
+});
+
+test('color settings parse for Cairo', () => {
+    assert.deepEqual(parseColor('#ff0000'), [1, 0, 0]);
+    assert.deepEqual(parseColor('#0f0'), [0, 1, 0]);
+    assert.deepEqual(parseColor('rgb(98,160,234)').map(c => Math.round(c * 255)), [98, 160, 234]);
+    assert.deepEqual(parseColor('rgba(0, 0, 255, 0.5)'), [0, 0, 1]);
+    assert.equal(parseColor(''), null, 'empty = theme color');
+    assert.equal(parseColor('tomato'), null);
+    assert.equal(parseColor(undefined), null);
 });
