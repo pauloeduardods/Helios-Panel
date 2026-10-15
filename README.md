@@ -12,7 +12,7 @@ The menu also shows each NVMe or SATA drive's temperature by model name, the Wi-
 It was built for the Acer Predator Helios Neo 16 (PHN16-72), but it works on any PC with sensors in `/sys/class/hwmon`, including Ryzen CPUs and Radeon GPUs.
 
 ```
- [▣ 61°] [▤ off] [◔ Balanced]   ← panel
+ [▣ 61°] [▤ off] [◔ Balanced]   ← panel (the default layout; see Settings → Layout)
 ```
 
 ## How it fits together
@@ -45,11 +45,15 @@ GNOME Shell keeps the extension code it loaded at login, so a new version only s
 - **X11:** press **Alt+F2**, type `r` and press Enter. Only gnome-shell restarts; your windows, terminals and running programs stay open. No logout needed.
 - **Wayland:** log out and back in (the shell cannot restart in place).
 
-To configure it, open the extension menu → **Settings**, or run `gnome-extensions prefs helios-panel@paulo`. You can:
+To configure it, open the extension menu → **Settings**, or run `gnome-extensions prefs helios-panel@paulo`. The **Layout** page decides what the top bar shows, with a live preview (heliosd's current values, or sample values when it is not running):
 
-- choose what the top bar shows (CPU and GPU temperature and usage, fans, power draw, profile) and **reorder** it;
-- add a **graph** of the last 1, 2 or 5 minutes next to any reading, or show the graph alone; pick its width, a line or a filled area, and whether it follows the temperature colors or uses one fixed color;
-- set the **warm and hot thresholds** and their colors. The numbers and the graphs change color when a reading crosses them.
+- **Segments**: each one has one icon and one text. Put several readings in one segment to merge them, e.g. `61°/47° · 24.5 W · Turbo`; reorder, add and remove segments.
+- **Templates**: a segment's text, e.g. `{cpu}°/{gpu}°` or `{watts} W · {battery}%`. Placeholders give the bare number, so the template adds the unit: `{cpu}` `{gpu}` (°C), `{cpu-usage}` `{gpu-usage}` (%), `{cpu-watts}` `{gpu-watts}` `{watts}` (battery draw, W), `{power}` (draw with its unit, or `AC`), `{battery}` (%), `{time-left}` (h:mm), `{profile}`, `{clock}` `{clock-max}` (GHz), `{fan}` (all fans) and `{fan1}`, `{fan2}`…; add `:1` for one decimal (`{cpu:1}`). A mistake never breaks the bar: that part shows `--`. A unit glued to a reading (`°`, `%`, ` W`) is left out when the reading shows `--` or `off`. With no template, the readings are joined by ` · ` and the ones the machine lacks (no battery, no GPU…) are left out.
+- **Graphs**: any segment can draw the last 1, 2 or 5 minutes of a reading as a **line**, a **filled area** or **bars**, next to its text or alone, following the temperature colors or in one fixed color.
+- **Presets**: Minimal, Default, Gaming (CPU and GPU graphs) and Battery, with Undo.
+- **Import and export** the layout as a JSON file, to back it up or share it.
+
+The **Colors** page sets the **warm and hot thresholds** and their colors, shared by the top bar, its graphs and the menu. Layouts from before this page existed are converted once, on first run, so nothing you set up is lost.
 
 To remove everything:
 
