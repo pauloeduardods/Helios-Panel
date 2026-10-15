@@ -354,10 +354,21 @@ lib/
 ├── client.js    HeliosClient: Gio.bus_watch_name + Gio.DBusProxy on the system bus
 ├── model.js     D-Bus values → view, temperature levels, labels, colors, graphs (pure)
 ├── layout.js    the top-bar layout: parse, migrate, presets, templates → markup (pure)
+├── alerts.js    alert and profile-on-AC decisions: snapshot + time → actions (pure)
 ├── draw.js      paints line, area and bar graphs on a Cairo context
 ├── prefs/layoutPage.js   Settings → Layout (editor, live preview, import/export)
-└── ui/indicator.js
+├── prefs/alerts.js       Settings → Alerts
+└── ui/
+    ├── indicator.js
+    └── alerts.js    HeliosAlerts: its own HeliosClient (no history) → AlertEngine
+                     → Main.notify / SetProfile
 ```
+
+- Alerts measure "held for N seconds" with `GLib.get_monotonic_time()` between
+  `g-properties-changed` signals, never with a timer. The automatic profile
+  remembers the profile it replaced and restores it on AC only if `Active`
+  still equals the profile it set; any other `Active` value in between counts
+  as a manual change and cancels the restore.
 
 - `Gio.bus_watch_name(SYSTEM, 'io.github.pauloeduardods.Helios1', AUTO_START)`
   drives two states:

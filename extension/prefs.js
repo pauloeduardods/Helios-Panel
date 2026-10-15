@@ -10,6 +10,7 @@ import {ExtensionPreferences} from 'resource:///org/gnome/Shell/Extensions/js/ex
 import {BUS_NAME, OBJECT_PATH} from './lib/client.js';
 import {profileFromDbus, sensorsFromDbus} from './lib/model.js';
 import {LayoutPage} from './lib/prefs/layoutPage.js';
+import {alertsPage} from './lib/prefs/alerts.js';
 
 export default class HeliosPanelPreferences extends ExtensionPreferences {
     fillPreferencesWindow(window) {
@@ -19,6 +20,7 @@ export default class HeliosPanelPreferences extends ExtensionPreferences {
         window.add(this._panelPage(settings));
         window.add(this._temperaturePage(settings));
         window.add(this._sensorPage(settings));
+        window.add(alertsPage(settings));
     }
 
     // ------------------------------------------------------------ pages

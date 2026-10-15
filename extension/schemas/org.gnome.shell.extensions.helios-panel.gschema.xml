@@ -84,5 +84,14 @@
     <!-- Sensors -->
     <key name="cpu-sensor" type="s"><default>''</default><summary>CPU sensor ('' = automatic)</summary></key>
     <key name="gpu-sensor" type="s"><default>''</default><summary>GPU sensor ('' = automatic, or hwmon:chip/label)</summary></key>
+
+    <!-- Alerts -->
+    <key name="heat-alert" type="b"><default>true</default><summary>Notify when the CPU or GPU stays hot</summary></key>
+    <key name="heat-alert-celsius" type="i"><range min="50" max="110"/><default>95</default><summary>Heat alert: from this temperature (°C)</summary></key>
+    <key name="heat-alert-seconds" type="i"><range min="2" max="600"/><default>30</default><summary>Heat alert: after this many seconds</summary></key>
+    <key name="battery-hint" type="b"><default>true</default><summary>Suggest a quieter profile when the battery runs low</summary></key>
+    <key name="battery-hint-percent" type="i"><range min="5" max="80"/><default>20</default><summary>Battery hint: at or below this percent</summary></key>
+    <key name="profile-on-battery" type="b"><default>false</default><summary>Switch the profile when unplugged and restore it when plugged in</summary></key>
+    <key name="battery-profile" type="s"><default>''</default><summary>Profile on battery ('' = automatic: low-power, else quiet)</summary></key>
   </schema>
 </schemalist>

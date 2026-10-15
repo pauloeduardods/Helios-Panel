@@ -112,9 +112,14 @@ function toHeliosError(e) {
 }
 
 export class HeliosClient {
-    /** @param {() => void} onChange called on every state or property change */
-    constructor(onChange) {
+    /**
+     * @param {() => void} onChange called on every state or property change
+     * @param {{history?: boolean}} options history: false skips GetHistory
+     *   and keeps no history (for users that only need snapshots)
+     */
+    constructor(onChange, {history = true} = {}) {
         this._onChange = onChange;
+        this._keepHistory = history;
         this._state = 'connecting';
         this._proxies = null;
         this._signalIds = [];
@@ -201,7 +206,7 @@ export class HeliosClient {
             this._proxies = Object.fromEntries(entries);
             for (const [key, proxy] of Object.entries(this._proxies)) {
                 const id = proxy.connect('g-properties-changed', () => {
-                    if (key === 'sensors')
+                    if (key === 'sensors' && this._keepHistory)
                         this._history.push(now(), historySample(this.snapshot()));
                     this._onChange();
                 });
@@ -209,7 +214,8 @@ export class HeliosClient {
             }
             this._history.clear();
             this._setState('running');
-            this._loadHistory(this._proxies.sensors, generation);
+            if (this._keepHistory)
+                this._loadHistory(this._proxies.sensors, generation);
         } catch (e) {
             if (generation !== this._generation)
                 return;
