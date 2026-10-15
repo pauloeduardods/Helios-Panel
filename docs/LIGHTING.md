@@ -230,8 +230,8 @@ commands, adapted to what is missing):
 
 ```bash
 sudo apt install dkms linux-headers-$(uname -r)   # if not installed yet
-sudo cp -rT kmod/helios-acer-lighting /usr/src/helios-acer-lighting-0.1.4
-sudo dkms install helios-acer-lighting/0.1.4
+sudo cp -rT kmod/helios-acer-lighting /usr/src/helios-acer-lighting-0.1.5
+sudo dkms install helios-acer-lighting/0.1.5
 ```
 
 Then, with Secure Boot **off**, or **on with the DKMS key already
@@ -391,6 +391,16 @@ Module 0.1.4 waits 100 ms before each zone write, and adds the logo's
 effect (method 21, target 2, read only) to `lighting_state`, to see whether
 the logo has a zero brightness. Writing the logo's effect (method 20,
 target 2) is still impossible in the module.
+
+With 0.1.4 only zone 1 still lit, so timing is not the cause.
+`lighting_state` read `logo=static 0 0 unknown 000000`: the logo has
+brightness 0 and no colour, which is why `LBST = 0xF1` alone left it dark.
+
+Module 0.1.5 tests the next two hypotheses, both approved:
+`keyboard_state` accepts 0 to 15, since `KBST = 1` lit exactly zone 1 and
+the zones are addressed as bits 1, 2, 4 and 8 (so `KBST = 15` may light all
+four); and a `logo_effect` attribute, the same line as `keyboard_effect`
+but with target 2, writes and reads the logo's effect.
 
 ## Safety summary
 

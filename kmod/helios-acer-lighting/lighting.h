@@ -90,11 +90,16 @@ int hal_effect_show(const struct hal_fw *fw, char *buf);
 int hal_state_show(const struct hal_fw *fw, char *buf);
 
 /*
- * keyboard_state and logo_state (write-only): "0" or "1". They write the
- * EC's keyboard state (KBST) and logo state (LBST 0xF0 or 0xF1).
+ * keyboard_state (write-only): 0 to 15, the EC's keyboard state (KBST),
+ * which looks like a mask of lit zones. logo_state (write-only): "0" or
+ * "1", the logo state (LBST 0xF0 or 0xF1).
  */
 int hal_keyboard_state_store(const struct hal_fw *fw, const char *buf, size_t len);
 int hal_logo_state_store(const struct hal_fw *fw, const char *buf, size_t len);
+
+/* logo_effect: the same line as keyboard_effect, for the lid logo. */
+int hal_logo_effect_store(const struct hal_fw *fw, const char *buf, size_t len);
+int hal_logo_effect_show(const struct hal_fw *fw, char *buf);
 
 /* keyboard_zones: "<brightness> <rrggbb> <rrggbb> <rrggbb> <rrggbb>". */
 int hal_zones_store(const struct hal_fw *fw, const char *buf, size_t len);

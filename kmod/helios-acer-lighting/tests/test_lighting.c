@@ -143,7 +143,7 @@ static void check_invariants(void)
 		switch (c->method) {
 		case HAL_SET_EFFECT:
 			CHECK(c->in_len == HAL_SET_EFFECT_IN, "method 20 size");
-			CHECK(c->in[9] == 1, "method 20 target is %u, not the keyboard", c->in[9]);
+			CHECK(c->in[9] == 1 || c->in[9] == 2, "method 20 target is %u", c->in[9]);
 			CHECK(c->in[0] <= 5, "effect %u", c->in[0]);
 			CHECK(c->in[1] <= 9, "speed %u", c->in[1]);
 			CHECK(c->in[2] <= 100, "brightness %u", c->in[2]);
@@ -172,7 +172,7 @@ static void check_invariants(void)
 		case HAL_SET_STATE:
 			CHECK(c->in_len == HAL_SET_STATE_IN, "method 2 size");
 			if (c->in[0] == 0x08) {
-				CHECK(c->in[5] <= 1, "KBST value %u", c->in[5]);
+				CHECK(c->in[5] <= 15, "KBST value %u", c->in[5]);
 				for (int b = 1; b < 16; b++)
 					CHECK(b == 5 || c->in[b] == 0, "method 2 byte %d is %u",
 					      b, c->in[b]);
@@ -461,13 +461,45 @@ static void test_state_show(void)
 	CHECK(fake.count == 2, "kept reading after a failure");
 }
 
+/* ------------------------------------------------------------- logo_effect */
+
+static void test_logo_effect(void)
+{
+	char buf[HAL_LINE_MAX];
+	const u8 want[16] = { 1, 4, 100, 0, 2, 0xff, 0, 0, 3, 2 };
+
+	reset();
+	CHECK(hal_logo_effect_store(&fw, "breathing 4 100 right ff0000", 28) == 0, "rejected");
+	CHECK(fake.count == 1 && fake.calls[0].method == HAL_SET_EFFECT, "one method 20 call");
+	check_bytes(&fake.calls[0], want, 16, "logo breathing");
+
+	reset();
+	CHECK(hal_logo_effect_store(&fw, "breathing 4 101 right ff0000", 28) == -EINVAL &&
+	      fake.count == 0, "bad logo line accepted");
+
+	/* keyboard_effect never targets the logo, and the reverse. */
+	reset();
+	hal_effect_store(&fw, "zoom 1 1 left 000001", 20);
+	CHECK(fake.calls[0].in[9] == 1, "keyboard_effect target %u", fake.calls[0].in[9]);
+
+	reset();
+	const u8 logo[16] = { 0, 0, 0, 0, 0xff, 0, 0, 0, 0, 0 };
+
+	memcpy(fake.logo_effect, logo, sizeof(logo));
+	hal_logo_effect_show(&fw, buf);
+	CHECK(!strcmp(buf, "static 0 0 unknown 000000\n"), "show gave \"%s\"", buf);
+	CHECK(fake.calls[0].in[0] == 2, "logo read target %u", fake.calls[0].in[0]);
+	check_invariants();
+}
+
 /* ------------------------------------------------ keyboard_state, logo_state */
 
 static void test_state_store(void)
 {
 	static const char *const bad[] = {
-		"", "\n", "2", "01", "00", "-1", "+1", "on", "1 1", " 1", "1 ", "0xf1", "f1",
+		"", "\n", "16", "255", "01", "00", "-1", "+1", "on", "1 1", " 1", "1 ", "0xf1", "f1",
 	};
+	static const char *const logo_bad[] = { "2", "15" };
 	const u8 kb_on[16] = { 0x08, 0, 0, 0, 0, 1 };
 	const u8 logo_on[16] = { 0x10, 0, 0, 0, 0, 0, 0xf1, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
 				 0xff };
@@ -480,6 +512,19 @@ static void test_state_store(void)
 	check_bytes(&fake.calls[0], kb_on, 16, "KBST 1");
 	reset();
 	CHECK(hal_keyboard_state_store(&fw, "0", 1) == 0 && fake.calls[0].in[5] == 0, "keyboard 0");
+	for (int m = 0; m <= 15; m++) {
+		char line[16];
+
+		reset();
+		snprintf(line, sizeof(line), "%d", m);
+		CHECK(hal_keyboard_state_store(&fw, line, strlen(line)) == 0 &&
+		      fake.calls[0].in[5] == m, "keyboard %d", m);
+	}
+	for (size_t i = 0; i < ARRAY_SIZE(logo_bad); i++) {
+		reset();
+		CHECK(hal_logo_state_store(&fw, logo_bad[i], strlen(logo_bad[i])) == -EINVAL &&
+		      fake.count == 0, "logo %s accepted", logo_bad[i]);
+	}
 
 	reset();
 	CHECK(hal_logo_state_store(&fw, "1", 1) == 0, "logo 1 rejected");
@@ -529,7 +574,7 @@ static void test_fuzz(void)
 			len += (size_t)snprintf(line + len, sizeof(line) - len, w ? " %s" : "%s", word);
 		}
 		reset();
-		switch (round % 4) {
+		switch (round % 5) {
 		case 0:
 			hal_effect_store(&fw, line, len);
 			break;
@@ -538,6 +583,9 @@ static void test_fuzz(void)
 			break;
 		case 2:
 			hal_keyboard_state_store(&fw, line, len);
+			break;
+		case 3:
+			hal_logo_effect_store(&fw, line, len);
 			break;
 		default:
 			hal_logo_state_store(&fw, line, len);
@@ -566,6 +614,7 @@ int main(void)
 		{ "zones show", test_zones_show },
 		{ "state show", test_state_show },
 		{ "state store", test_state_store },
+		{ "logo effect", test_logo_effect },
 		{ "fuzz", test_fuzz },
 	};
 	size_t n = ARRAY_SIZE(tests);

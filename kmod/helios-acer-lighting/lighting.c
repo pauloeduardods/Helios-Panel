@@ -8,8 +8,10 @@
 
 /* Method 20 byte 9 selects the target. Only the keyboard is ever sent. */
 #define TARGET_KEYBOARD 1
-/* Read only: the logo (LB) target of method 21. */
+/* The lid logo (LB) target, written only through logo_effect. */
 #define TARGET_LOGO 2
+/* KBST looks like a mask of lit zones, one bit per zone (as in method 6). */
+#define KBST_MAX 0x0f
 /*
  * Method 20 byte 8, stored by the firmware as KLES. The ACPI code only
  * stores it, but the static effect stays dark unless it is 3, the value the
@@ -222,8 +224,8 @@ static int set(const struct hal_fw *fw, enum hal_method method, const u8 *in, si
 	return out[0] == 0 ? 0 : -EIO;
 }
 
-static int set_effect(const struct hal_fw *fw, u8 effect, u8 speed, u8 brightness,
-		      u8 direction, struct rgb c)
+static int set_target_effect(const struct hal_fw *fw, u8 target, u8 effect, u8 speed,
+			     u8 brightness, u8 direction, struct rgb c)
 {
 	u8 in[HAL_SET_EFFECT_IN] = { 0 };
 
@@ -236,8 +238,14 @@ static int set_effect(const struct hal_fw *fw, u8 effect, u8 speed, u8 brightnes
 	in[6] = c.g;
 	in[7] = c.b;
 	in[8] = STORED_STATE;
-	in[9] = TARGET_KEYBOARD;
+	in[9] = target;
 	return set(fw, HAL_SET_EFFECT, in, sizeof(in));
+}
+
+static int set_effect(const struct hal_fw *fw, u8 effect, u8 speed, u8 brightness,
+		      u8 direction, struct rgb c)
+{
+	return set_target_effect(fw, TARGET_KEYBOARD, effect, speed, brightness, direction, c);
 }
 
 static int get_target_effect(const struct hal_fw *fw, u8 target, u8 *out)
@@ -268,7 +276,7 @@ static int get_state(const struct hal_fw *fw, u8 selector, u8 *out)
 
 /* ------------------------------------------------------------- attributes */
 
-int hal_effect_store(const struct hal_fw *fw, const char *buf, size_t len)
+static int effect_store(const struct hal_fw *fw, u8 target, const char *buf, size_t len)
 {
 	struct tokens t;
 	u8 effect, speed, brightness, direction;
@@ -282,7 +290,17 @@ int hal_effect_store(const struct hal_fw *fw, const char *buf, size_t len)
 	    parse_rgb(t.word[4], t.len[4], &c))
 		return -EINVAL;
 
-	return set_effect(fw, effect, speed, brightness, direction, c);
+	return set_target_effect(fw, target, effect, speed, brightness, direction, c);
+}
+
+int hal_effect_store(const struct hal_fw *fw, const char *buf, size_t len)
+{
+	return effect_store(fw, TARGET_KEYBOARD, buf, len);
+}
+
+int hal_logo_effect_store(const struct hal_fw *fw, const char *buf, size_t len)
+{
+	return effect_store(fw, TARGET_LOGO, buf, len);
 }
 
 /* "<effect> <speed> <brightness> <direction> <rrggbb>" from a method 21 reply. */
@@ -299,16 +317,26 @@ static void put_effect(struct line *l, const u8 *out)
 	put_rgb(l, out + 6);
 }
 
-int hal_effect_show(const struct hal_fw *fw, char *buf)
+static int effect_show(const struct hal_fw *fw, u8 target, char *buf)
 {
 	u8 out[HAL_GET_EFFECT_OUT] = { 0 };
 	struct line l = { buf, 0 };
-	int ret = get_effect(fw, out);
+	int ret = get_target_effect(fw, target, out);
 
 	if (ret)
 		return ret;
 	put_effect(&l, out);
 	return finish(&l);
+}
+
+int hal_effect_show(const struct hal_fw *fw, char *buf)
+{
+	return effect_show(fw, TARGET_KEYBOARD, buf);
+}
+
+int hal_logo_effect_show(const struct hal_fw *fw, char *buf)
+{
+	return effect_show(fw, TARGET_LOGO, buf);
 }
 
 int hal_zones_store(const struct hal_fw *fw, const char *buf, size_t len)
@@ -411,11 +439,11 @@ static int set_state(const struct hal_fw *fw, const u8 *in)
 	return set(fw, HAL_SET_STATE, in, HAL_SET_STATE_IN);
 }
 
-static int parse_bit(const char *buf, size_t len, u8 *bit)
+static int parse_one(const char *buf, size_t len, unsigned int max, u8 *value)
 {
 	struct tokens t;
 
-	if (split(buf, len, &t, 1) || parse_uint(t.word[0], t.len[0], 1, bit))
+	if (split(buf, len, &t, 1) || parse_uint(t.word[0], t.len[0], max, value))
 		return -EINVAL;
 	return 0;
 }
@@ -423,12 +451,12 @@ static int parse_bit(const char *buf, size_t len, u8 *bit)
 int hal_keyboard_state_store(const struct hal_fw *fw, const char *buf, size_t len)
 {
 	u8 in[HAL_SET_STATE_IN] = { 0 };
-	u8 bit;
+	u8 mask;
 
-	if (parse_bit(buf, len, &bit))
+	if (parse_one(buf, len, KBST_MAX, &mask))
 		return -EINVAL;
 	in[0] = STATE_KEYBOARD;
-	in[5] = bit;
+	in[5] = mask;
 	return set_state(fw, in);
 }
 
@@ -438,7 +466,7 @@ int hal_logo_state_store(const struct hal_fw *fw, const char *buf, size_t len)
 	size_t i;
 	u8 bit;
 
-	if (parse_bit(buf, len, &bit))
+	if (parse_one(buf, len, 1, &bit))
 		return -EINVAL;
 	/* The firmware only accepts 0xF0/0xF1 followed by seven 0xFF bytes. */
 	in[0] = STATE_LOGO;
