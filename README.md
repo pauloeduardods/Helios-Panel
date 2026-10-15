@@ -7,7 +7,7 @@ Laptop sensors and the platform profile for Linux, with a GNOME Shell top-bar ex
 - optionally, the **fan** speed;
 - optionally, the **power draw** while on battery (a dimmed `AC` when plugged in).
 
-The menu also shows the battery charge and state, the time left, the battery health (full capacity against the design capacity) the CPU package draw and the NVIDIA GPU's power draw.
+The menu also shows each NVMe or SATA drive's temperature by model name, the Wi-Fi card's temperature, CPU and GPU usage, the CPU clock (average and fastest core), the battery charge and state, the time left, the battery health (full capacity against the design capacity) the CPU package draw and the NVIDIA GPU's power draw.
 
 It was built for the Acer Predator Helios Neo 16 (PHN16-72), but it works on any PC with sensors in `/sys/class/hwmon`, including Ryzen CPUs and Radeon GPUs.
 
@@ -77,6 +77,10 @@ What goes where:
 | Fans | `acer` hwmon (from `acer_wmi`) |
 | Power source, battery, draw | `/sys/class/power_supply` (the laptop's own `Mains` and `Battery`; peripherals such as a wireless mouse are skipped) |
 | NVIDIA GPU draw | `nvidia-smi`, in the same query as the temperature |
+| Drives, Wi-Fi | `nvme`, `drivetemp` and `iwlwifi*` hwmon chips; the drive's model from `device/model` |
+| CPU usage | `/proc/stat`, between two reads |
+| CPU clock | `/sys/devices/system/cpu/cpufreq/policy*/scaling_cur_freq` |
+| GPU usage | `nvidia-smi` (same query as the temperature) or `amdgpu`'s `gpu_busy_percent` |
 | CPU package draw | RAPL energy counter, `/sys/class/powercap/intel-rapl:N` (Intel and AMD) |
 | Profile | `/sys/firmware/acpi/platform_profile` |
 

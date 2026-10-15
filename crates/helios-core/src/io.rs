@@ -16,7 +16,7 @@ pub trait SysFs {
     fn write(&self, path: &str, value: &str) -> std::io::Result<()>;
 }
 
-/// Runs `nvidia-smi --query-gpu=temperature.gpu,power.draw --format=csv,noheader,nounits`.
+/// Runs `nvidia-smi --query-gpu=temperature.gpu,power.draw,utilization.gpu --format=csv,noheader,nounits`.
 pub trait GpuQuery {
     /// Its stdout, or `None` if it failed or timed out.
     fn query(&self) -> Option<String>;

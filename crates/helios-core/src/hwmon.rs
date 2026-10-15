@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Sensor discovery over /sys/class/hwmon, and the NVIDIA PCI device lookup.
 
+use serde::Serialize;
+
 use crate::io::SysFs;
 
 pub const HWMON_ROOT: &str = "/sys/class/hwmon";
@@ -176,6 +178,70 @@ pub fn resolve_fans(chips: &[Chip]) -> Vec<Input> {
         .unwrap_or_default()
 }
 
+/// What a component sensor belongs to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum DeviceKind {
+    Storage,
+    Wifi,
+}
+
+/// Components other than the CPU and GPU, by chip name. A chip matches its
+/// name or the name plus a `_` suffix (the Wi-Fi chip is `iwlwifi_1_6`), so
+/// supporting another chip is one line here.
+const DEVICE_CHIPS: &[(&str, DeviceKind)] = &[
+    ("nvme", DeviceKind::Storage),
+    ("drivetemp", DeviceKind::Storage), // SATA drives
+    ("iwlwifi", DeviceKind::Wifi),      // Intel
+];
+
+/// One component temperature: the chip's first input (an NVMe drive's
+/// "Composite").
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeviceSensor {
+    pub kind: DeviceKind,
+    /// The drive model when the device reports one, else a generic name.
+    /// Several drives share the chip name "nvme", so this tells them apart.
+    pub name: String,
+    pub path: String,
+}
+
+fn device_kind(chip: &str) -> Option<DeviceKind> {
+    DEVICE_CHIPS.iter().find_map(|(name, kind)| {
+        let matches = chip == *name
+            || chip
+                .strip_prefix(name)
+                .is_some_and(|rest| rest.starts_with('_'));
+        matches.then_some(*kind)
+    })
+}
+
+/// Drives and network cards with a temperature, sorted by kind then name so
+/// the order survives reboots (hwmon numbers do not).
+pub fn resolve_devices(fs: &dyn SysFs, chips: &[Chip]) -> Vec<DeviceSensor> {
+    let mut devices: Vec<DeviceSensor> = chips
+        .iter()
+        .filter_map(|c| {
+            let kind = device_kind(&c.name)?;
+            let input = c.temps.first()?;
+            let name = match kind {
+                DeviceKind::Wifi => "Wi-Fi".to_owned(),
+                DeviceKind::Storage => fs
+                    .read_to_string(&format!("{}/device/model", c.dir))
+                    .filter(|m| !m.is_empty())
+                    .unwrap_or_else(|| "Drive".to_owned()),
+            };
+            Some(DeviceSensor {
+                kind,
+                name,
+                path: input.path.clone(),
+            })
+        })
+        .collect();
+    devices.sort_by(|a, b| (a.kind, &a.name).cmp(&(b.kind, &b.name)));
+    devices
+}
+
 /// The NVIDIA display controller's PCI directory, if any.
 pub fn find_nvidia_pci_dir(fs: &dyn SysFs) -> Option<String> {
     fs.read_dir(PCI_ROOT).into_iter().find_map(|entry| {
@@ -278,6 +344,49 @@ mod tests {
             "/sys/class/hwmon/hwmon4/temp1_input"
         );
         assert!(resolve_fans(&chips).is_empty());
+    }
+
+    #[test]
+    fn phn16_72_drives_and_wifi() {
+        let fs = FakeFs::new(PHN16_72);
+        let devices = resolve_devices(&fs, &scan(&fs));
+        let names: Vec<_> = devices.iter().map(|d| (d.kind, d.name.as_str())).collect();
+        assert_eq!(
+            names,
+            [
+                (DeviceKind::Storage, "CT500P2SSD8"),
+                (DeviceKind::Storage, "SAMSUNG MZVL21T0HCLR-00B07"),
+                (DeviceKind::Wifi, "Wi-Fi"),
+            ]
+        );
+        assert_eq!(
+            devices[1].path, "/sys/class/hwmon/hwmon4/temp1_input",
+            "the drive's Composite sensor"
+        );
+    }
+
+    #[test]
+    fn device_chips_match_by_name_or_prefix() {
+        assert_eq!(device_kind("nvme"), Some(DeviceKind::Storage));
+        assert_eq!(device_kind("iwlwifi_1_6"), Some(DeviceKind::Wifi));
+        assert_eq!(device_kind("iwlwifi"), Some(DeviceKind::Wifi));
+        assert_eq!(device_kind("nvmex"), None);
+        assert_eq!(device_kind("coretemp"), None);
+    }
+
+    #[test]
+    fn drives_without_a_model_or_a_temperature() {
+        let fs = FakeFs::new(&[
+            ("/sys/class/hwmon/hwmon0/name", "drivetemp"),
+            ("/sys/class/hwmon/hwmon0/temp1_input", "35000"),
+            ("/sys/class/hwmon/hwmon1/name", "nvme"),
+        ]);
+        let devices = resolve_devices(&fs, &scan(&fs));
+        assert_eq!(devices.len(), 1, "a chip without a temperature is skipped");
+        assert_eq!(devices[0].name, "Drive");
+        assert!(
+            resolve_devices(&FakeFs::new(AMD_DESKTOP), &scan(&FakeFs::new(AMD_DESKTOP))).is_empty()
+        );
     }
 
     #[test]

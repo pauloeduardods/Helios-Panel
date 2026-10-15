@@ -6,9 +6,9 @@ use std::process::ExitCode;
 
 use helios_core::GpuQuery;
 use helios_core::doctor::{self, Level, Report};
+use helios_core::hwmon::DeviceKind;
 use helios_core::nvidia::GpuState;
 use helios_core::power::{BatteryState, PowerSource, PowerStatus};
-use helios_core::rapl;
 use helios_core::status::{Monitor, Status};
 use helios_sys::{NvidiaSmi, RootedFs, SystemClock};
 
@@ -21,7 +21,8 @@ Commands:
   help              Show this help
   version           Show the version
 
-Neither command needs root or changes anything. An NVIDIA GPU that is
+Neither command needs root or changes anything; status waits about half a
+second to measure CPU usage. An NVIDIA GPU that is
 asleep is never woken. doctor exits with 1 when something needs attention.";
 
 #[derive(Debug, PartialEq, Eq)]
@@ -180,6 +181,39 @@ fn render(status: &Status) -> String {
         line("Fans", fans.join(", "));
     }
 
+    let percent = |p: f64| format!("{p:.0}%");
+    let mut usage = Vec::new();
+    if let Some(p) = status.cpu.usage_percent {
+        usage.push(format!("CPU {}", percent(p)));
+    }
+    if let Some(p) = gpu.usage_percent {
+        usage.push(format!("GPU {}", percent(p)));
+    }
+    if !usage.is_empty() {
+        line("Usage", usage.join(", "));
+    }
+    if let (Some(average), Some(max)) = (status.cpu.average_ghz, status.cpu.max_ghz) {
+        line(
+            "Clock",
+            format!("{average:.1} GHz average, {max:.1} GHz max"),
+        );
+    }
+
+    for (kind, name) in [(DeviceKind::Storage, "Drives"), (DeviceKind::Wifi, "Wi-Fi")] {
+        let devices: Vec<String> = status
+            .devices
+            .iter()
+            .filter(|d| d.kind == kind)
+            .map(|d| match kind {
+                DeviceKind::Wifi => celsius(d.celsius),
+                DeviceKind::Storage => format!("{} {}", d.name, celsius(d.celsius)),
+            })
+            .collect();
+        if !devices.is_empty() {
+            line(name, devices.join(", "));
+        }
+    }
+
     for (name, value) in render_power(&status.power) {
         line(name, value);
     }
@@ -211,9 +245,9 @@ fn status(options: &Options, json: bool) -> Result<String, String> {
     let clock = SystemClock::new();
     let mut monitor = Monitor::new(&fs);
     let mut status = monitor.poll(&fs, smi, &clock);
-    // Only as root: the CPU draw needs a second read of its counter.
-    if monitor.cpu_power_pending() {
-        std::thread::sleep(rapl::WINDOW);
+    // CPU usage (and, as root, the CPU draw) needs a second read.
+    if let Some(wait) = monitor.settle_time() {
+        std::thread::sleep(wait);
         status = monitor.poll(&fs, smi, &clock);
     }
     if json {
@@ -390,6 +424,9 @@ mod tests {
 CPU      61.0 °C  (hwmon:coretemp/Package id 0)
 GPU      no sensor found
 Fans     Fan 1 2350 RPM, Fan 2 2600 RPM
+Clock    2.1 GHz average, 4.8 GHz max
+Drives   CT500P2SSD8 44.9 °C, SAMSUNG MZVL21T0HCLR-00B07 47.9 °C
+Wi-Fi    52.0 °C
 Power    AC
 Battery  80%, not charging  (BAT1, health 92%)
 Profile  balanced  (acer-wmi)
@@ -429,6 +466,23 @@ Choices  low-power, quiet, balanced, balanced-performance, performance
             text.starts_with("CPU      61.0 °C, 12.3 W  (hwmon:coretemp/Package id 0)\n"),
             "{text}"
         );
+    }
+
+    #[test]
+    fn human_output_with_usage() {
+        let fs = FakeFs::new(PHN16_72);
+        fs.set(
+            "/sys/bus/pci/devices/0000:01:00.0/power/runtime_status",
+            "active",
+        );
+        let smi = helios_core::fake::FakeGpu::new("47, 35.2, 30\n");
+        let clock = FakeClock::starting_at(0);
+        let mut monitor = Monitor::new(&fs);
+        monitor.poll(&fs, Some(&smi), &clock);
+        fs.set("/proc/stat", "cpu  1100 0 630 9750 220 0 0 0 0 0\n");
+        clock.advance(2);
+        let text = render(&monitor.poll(&fs, Some(&smi), &clock));
+        assert!(text.contains("\nUsage    CPU 23%, GPU 30%\n"), "{text}");
     }
 
     #[test]

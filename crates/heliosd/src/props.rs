@@ -2,6 +2,7 @@
 //! The D-Bus shape of a [`Status`], and which properties changed between two
 //! snapshots. Pure: no bus access, unit-tested below.
 
+use helios_core::hwmon::DeviceKind;
 use helios_core::nvidia::GpuState;
 use helios_core::power::{BatteryState, PowerSource};
 use helios_core::status::Status;
@@ -19,6 +20,12 @@ pub type Temperature = (String, String, String, f64);
 pub type GpuPower = (bool, f64);
 /// (valid, W)
 pub type CpuPower = (bool, f64);
+/// (valid, %)
+pub type Usage = (bool, f64);
+/// (valid, average GHz, max GHz)
+pub type CpuFrequency = (bool, f64, f64);
+/// (kind, name, °C); unreadable sensors are left out
+pub type Device = (String, String, f64);
 /// (name, state, %, W, health %, cycles, minutes left); name "" = no battery,
 /// -1 = unknown
 pub type Battery = (String, String, f64, f64, f64, i32, i32);
@@ -31,6 +38,10 @@ pub struct SensorsProps {
     pub temperatures: Vec<Temperature>,
     pub gpu_power: GpuPower,
     pub cpu_power: CpuPower,
+    pub cpu_usage: Usage,
+    pub cpu_frequency: CpuFrequency,
+    pub gpu_usage: Usage,
+    pub devices: Vec<Device>,
     pub power_source: String,
     pub battery: Battery,
 }
@@ -92,6 +103,13 @@ fn battery(s: &Status) -> Battery {
     )
 }
 
+pub fn device_kind_name(kind: DeviceKind) -> &'static str {
+    match kind {
+        DeviceKind::Storage => "storage",
+        DeviceKind::Wifi => "wifi",
+    }
+}
+
 pub fn gpu_state_name(state: GpuState) -> &'static str {
     match state {
         GpuState::On => "on",
@@ -127,6 +145,23 @@ impl From<&Status> for SensorsProps {
                 .collect(),
             gpu_power: reading(s.gpu.watts),
             cpu_power: reading(s.cpu.watts),
+            cpu_usage: reading(s.cpu.usage_percent),
+            cpu_frequency: match (s.cpu.average_ghz, s.cpu.max_ghz) {
+                (Some(average), Some(max)) => (true, average, max),
+                _ => (false, 0.0, 0.0),
+            },
+            gpu_usage: reading(s.gpu.usage_percent),
+            devices: s
+                .devices
+                .iter()
+                .filter_map(|d| {
+                    Some((
+                        device_kind_name(d.kind).to_owned(),
+                        d.name.clone(),
+                        d.celsius?,
+                    ))
+                })
+                .collect(),
             power_source: power_source_name(s.power.source).to_owned(),
             battery: battery(s),
         }
@@ -166,6 +201,18 @@ pub fn sensors_changes(old: &SensorsProps, new: &SensorsProps) -> Changes {
     }
     if old.cpu_power != new.cpu_power {
         out.push(("CpuPower", Value::from(new.cpu_power)));
+    }
+    if old.cpu_usage != new.cpu_usage {
+        out.push(("CpuUsage", Value::from(new.cpu_usage)));
+    }
+    if old.cpu_frequency != new.cpu_frequency {
+        out.push(("CpuFrequency", Value::from(new.cpu_frequency)));
+    }
+    if old.gpu_usage != new.gpu_usage {
+        out.push(("GpuUsage", Value::from(new.gpu_usage)));
+    }
+    if old.devices != new.devices {
+        out.push(("Devices", Value::from(new.devices.clone())));
     }
     if old.power_source != new.power_source {
         out.push(("PowerSource", Value::from(new.power_source.clone())));
@@ -217,9 +264,20 @@ mod tests {
             sensors.fans,
             [("Fan 1".into(), 2350), ("Fan 2".into(), 2600)]
         );
-        assert_eq!(sensors.temperatures.len(), 4);
+        assert_eq!(sensors.temperatures.len(), 8);
         assert_eq!(sensors.gpu_power, (false, 0.0));
         assert_eq!(sensors.cpu_power, (false, 0.0), "first poll: no value yet");
+        assert_eq!(sensors.cpu_usage, (false, 0.0), "first poll: no value yet");
+        assert_eq!(sensors.cpu_frequency, (true, 2.1, 4.8));
+        assert_eq!(sensors.gpu_usage, (false, 0.0));
+        assert_eq!(
+            sensors.devices,
+            [
+                ("storage".into(), "CT500P2SSD8".into(), 44.9),
+                ("storage".into(), "SAMSUNG MZVL21T0HCLR-00B07".into(), 47.9),
+                ("wifi".into(), "Wi-Fi".into(), 52.0),
+            ]
+        );
         assert_eq!(sensors.power_source, "ac");
         assert_eq!(
             sensors.battery,
@@ -249,7 +307,7 @@ mod tests {
         assert_eq!(sensors.fans[0], ("Fan 1".into(), -1));
         assert_eq!(
             sensors.temperatures.len(),
-            3,
+            7,
             "the unreadable sensor is left out"
         );
     }

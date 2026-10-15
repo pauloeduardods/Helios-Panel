@@ -125,7 +125,9 @@ fn json_status_phn16_72_with_the_gpu_asleep() {
     assert_eq!(status["profile"]["active"], "balanced");
     assert_eq!(status["profile"]["driver"], "acer-wmi");
     assert_eq!(status["profile"]["choices"][0], "low-power");
-    assert_eq!(status["temperatures"].as_array().unwrap().len(), 4);
+    assert_eq!(status["temperatures"].as_array().unwrap().len(), 8);
+    assert_eq!(status["devices"][1]["name"], "SAMSUNG MZVL21T0HCLR-00B07");
+    assert_eq!(status["cpu"]["max_ghz"], 4.8);
 
     assert_eq!(fx.smi_runs(), 0, "a suspended GPU must never be queried");
     assert_eq!(fx.snapshot(), before, "status must not write anything");

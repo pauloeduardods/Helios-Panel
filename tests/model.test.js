@@ -3,9 +3,10 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
-    Level, batteryStateLabel, daemonMessage, formatDuration, formatRpm, formatTemp, formatWatts,
-    pickCpu, pickGpu, powerFromDbus, powerPanelText, profileColor, profileFromDbus, profileLabel,
-    sanitizeThresholds, sensorsFromDbus, setProfileError, tempLevel,
+    Level, batteryStateLabel, daemonMessage, formatClock, formatDuration, formatPercent, formatRpm,
+    formatTemp, formatWatts, pickCpu, pickGpu, powerFromDbus, powerPanelText, profileColor,
+    profileFromDbus, profileLabel, sanitizeThresholds, sensorsFromDbus, setProfileError, tempLevel,
+    usageFromDbus,
 } from '../extension/lib/model.js';
 
 // What heliosd publishes on a PHN16-72 with the NVIDIA GPU asleep.
@@ -113,6 +114,28 @@ test('heliosd sensors become plain objects', () => {
     assert.deepEqual(s.gpu, {source: 'nvidia-smi', state: 'off', celsius: null});
     assert.deepEqual(s.fans, [{label: 'Fan 1', rpm: 2350}, {label: 'Fan 2', rpm: null}]);
     assert.equal(s.temperatures.length, 3);
+    assert.deepEqual(s.devices, []);
+});
+
+test('drives and the Wi-Fi card become plain objects', () => {
+    const s = sensorsFromDbus({Devices: [['storage', 'CT500P2SSD8', 44.9], ['wifi', 'Wi-Fi', 52]]});
+    assert.deepEqual(s.devices, [
+        {kind: 'storage', name: 'CT500P2SSD8', celsius: 44.9},
+        {kind: 'wifi', name: 'Wi-Fi', celsius: 52},
+    ]);
+});
+
+test('usage and clock', () => {
+    const u = usageFromDbus({CpuUsage: [true, 23], CpuFrequency: [true, 1.4, 3.8], GpuUsage: [false, 0]});
+    assert.deepEqual(u, {cpu: 23, gpu: null, averageGhz: 1.4, maxGhz: 3.8});
+    assert.equal(formatPercent(u.cpu), '23%');
+    assert.equal(formatPercent(u.gpu), '--');
+    assert.equal(formatClock(u), '1.4 GHz · max 3.8 GHz');
+
+    const older = usageFromDbus({});
+    assert.deepEqual(older, {cpu: null, gpu: null, averageGhz: null, maxGhz: null}, 'API v3 heliosd');
+    assert.equal(formatClock(older), null);
+    assert.deepEqual(usageFromDbus(), older);
 });
 
 test('missing properties never throw', () => {

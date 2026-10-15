@@ -4,7 +4,8 @@
 
 use serde::Serialize;
 
-use crate::hwmon::{self, milli_to_celsius};
+use crate::cpu::{self, CpuUsageMeter};
+use crate::hwmon::{self, DeviceKind, milli_to_celsius};
 use crate::io::{Clock, GpuQuery, SysFs, read_int};
 use crate::nvidia::{GpuState, NvidiaGpu};
 use crate::power::{PowerMonitor, PowerStatus};
@@ -26,6 +27,8 @@ pub struct Status {
     pub power: PowerStatus,
     pub profile: ProfileState,
     pub temperatures: Vec<TempStatus>,
+    /// Drives and network cards.
+    pub devices: Vec<DeviceStatus>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -34,6 +37,11 @@ pub struct CpuStatus {
     pub celsius: Option<f64>,
     /// Package draw from RAPL; needs root and two polls.
     pub watts: Option<f64>,
+    /// All CPUs, whole percent; needs two polls.
+    pub usage_percent: Option<f64>,
+    /// Across the cores, GHz.
+    pub average_ghz: Option<f64>,
+    pub max_ghz: Option<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -43,6 +51,14 @@ pub struct GpuStatus {
     pub celsius: Option<f64>,
     /// Board power draw; only from nvidia-smi.
     pub watts: Option<f64>,
+    pub usage_percent: Option<f64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct DeviceStatus {
+    pub kind: DeviceKind,
+    pub name: String,
+    pub celsius: Option<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -75,6 +91,7 @@ pub struct Monitor {
     nvidia: Option<NvidiaGpu>,
     power: PowerMonitor,
     cpu_power: CpuPowerMeter,
+    cpu_usage: CpuUsageMeter,
 }
 
 impl Monitor {
@@ -83,13 +100,21 @@ impl Monitor {
             nvidia: NvidiaGpu::detect(fs),
             power: PowerMonitor::default(),
             cpu_power: CpuPowerMeter::default(),
+            cpu_usage: CpuUsageMeter::default(),
         }
     }
 
-    /// The CPU draw is readable but needs another poll after
-    /// [`crate::rapl::WINDOW`] to have a value.
-    pub fn cpu_power_pending(&self) -> bool {
-        self.cpu_power.pending()
+    /// How long a one-shot reader (heliosctl) should wait before a second
+    /// poll that fills the readings needing two reads; `None` when the first
+    /// poll already has everything it can get.
+    pub fn settle_time(&self) -> Option<std::time::Duration> {
+        if self.cpu_power.pending() {
+            Some(crate::rapl::WINDOW)
+        } else if self.cpu_usage.pending() {
+            Some(cpu::USAGE_SETTLE)
+        } else {
+            None
+        }
     }
 
     /// `gpu_query` is `None` when nvidia-smi is not installed.
@@ -103,18 +128,26 @@ impl Monitor {
         let chips = hwmon::scan(fs);
 
         let cpu = hwmon::resolve_cpu(&chips, "");
+        let frequency = cpu::read_frequency(fs);
         let cpu = CpuStatus {
             celsius: cpu.as_ref().and_then(|s| read_celsius(fs, &s.path)),
             sensor: cpu.map(|s| s.id()),
             watts: self.cpu_power.read(fs, clock),
+            usage_percent: self.cpu_usage.read(fs),
+            average_ghz: frequency.map(|f| f.average),
+            max_ghz: frequency.map(|f| f.max),
         };
 
         let gpu = if let Some(amd) = hwmon::resolve_amd_gpu(&chips) {
+            let chip_dir = amd.path.rsplit_once('/').map_or("", |(dir, _)| dir);
             GpuStatus {
                 celsius: read_celsius(fs, &amd.path),
                 source: Some(amd.id()),
                 state: GpuState::On,
                 watts: None,
+                usage_percent: read_int(fs, &format!("{chip_dir}/device/gpu_busy_percent"))
+                    .filter(|p| (0..=100).contains(p))
+                    .map(|p| p as f64),
             }
         } else if let (Some(nvidia), Some(query)) = (self.nvidia.as_mut(), gpu_query) {
             let reading = nvidia.read(fs, query, clock);
@@ -123,6 +156,7 @@ impl Monitor {
                 state: reading.state,
                 celsius: reading.celsius.map(round_tenth),
                 watts: reading.watts.map(round_tenth),
+                usage_percent: reading.usage.map(f64::round),
             }
         } else {
             GpuStatus {
@@ -130,6 +164,7 @@ impl Monitor {
                 state: GpuState::None,
                 celsius: None,
                 watts: None,
+                usage_percent: None,
             }
         };
 
@@ -153,6 +188,15 @@ impl Monitor {
             })
             .collect();
 
+        let devices = hwmon::resolve_devices(fs, &chips)
+            .into_iter()
+            .map(|d| DeviceStatus {
+                celsius: read_celsius(fs, &d.path),
+                kind: d.kind,
+                name: d.name,
+            })
+            .collect();
+
         Status {
             schema: SCHEMA_VERSION,
             cpu,
@@ -161,6 +205,7 @@ impl Monitor {
             power: self.power.poll(fs, clock),
             profile: profile::read_state(fs),
             temperatures,
+            devices,
         }
     }
 }
@@ -183,8 +228,14 @@ mod tests {
             serde_json::to_value(&status).unwrap(),
             json!({
                 "schema": 1,
-                "cpu": {"sensor": "hwmon:coretemp/Package id 0", "celsius": 61.0, "watts": null},
-                "gpu": {"source": "nvidia-smi", "state": "off", "celsius": null, "watts": null},
+                "cpu": {
+                    "sensor": "hwmon:coretemp/Package id 0", "celsius": 61.0, "watts": null,
+                    "usage_percent": null, "average_ghz": 2.1, "max_ghz": 4.8,
+                },
+                "gpu": {
+                    "source": "nvidia-smi", "state": "off", "celsius": null, "watts": null,
+                    "usage_percent": null,
+                },
                 "fans": [{"label": "Fan 1", "rpm": 2350}, {"label": "Fan 2", "rpm": 2600}],
                 "power": {
                     "source": "ac",
@@ -199,9 +250,20 @@ mod tests {
                 },
                 "temperatures": [
                     {"id": "hwmon:acpitz/temp1", "chip": "acpitz", "label": "temp1", "celsius": 45.0},
+                    {"id": "hwmon:iwlwifi_1_6/temp1", "chip": "iwlwifi_1_6", "label": "temp1", "celsius": 52.0},
                     {"id": "hwmon:acer/temp1", "chip": "acer", "label": "temp1", "celsius": 52.0},
+                    {"id": "hwmon:nvme/Composite", "chip": "nvme", "label": "Composite", "celsius": 47.9},
+                    {"id": "hwmon:nvme/Sensor 1", "chip": "nvme", "label": "Sensor 1", "celsius": 47.9},
                     {"id": "hwmon:coretemp/Package id 0", "chip": "coretemp", "label": "Package id 0", "celsius": 61.0},
                     {"id": "hwmon:coretemp/Core 0", "chip": "coretemp", "label": "Core 0", "celsius": 58.0},
+                    // Same id as the other drive: hwmon ids cannot tell two
+                    // drives apart, which is why `devices` exists.
+                    {"id": "hwmon:nvme/Composite", "chip": "nvme", "label": "Composite", "celsius": 44.9},
+                ],
+                "devices": [
+                    {"kind": "storage", "name": "CT500P2SSD8", "celsius": 44.9},
+                    {"kind": "storage", "name": "SAMSUNG MZVL21T0HCLR-00B07", "celsius": 47.9},
+                    {"kind": "wifi", "name": "Wi-Fi", "celsius": 52.0},
                 ],
             })
         );
@@ -212,7 +274,7 @@ mod tests {
     fn phn16_72_with_the_gpu_awake() {
         let fs = FakeFs::new(PHN16_72);
         fs.set(STATUS, "active");
-        let smi = FakeGpu::new("47, 35.23\n");
+        let smi = FakeGpu::new("47, 35.23, 30.4\n");
         let status = Monitor::new(&fs).poll(&fs, Some(&smi), &FakeClock::default());
         assert_eq!(
             status.gpu,
@@ -221,23 +283,41 @@ mod tests {
                 state: GpuState::On,
                 celsius: Some(47.0),
                 watts: Some(35.2),
+                usage_percent: Some(30.0),
             }
         );
         assert_eq!(smi.calls(), 1);
     }
 
     #[test]
-    fn cpu_draw_needs_a_second_poll() {
+    fn cpu_draw_and_usage_need_a_second_poll() {
         let fs = FakeFs::new(PHN16_72);
         let clock = FakeClock::starting_at(0);
         let mut monitor = Monitor::new(&fs);
-        assert_eq!(monitor.poll(&fs, None, &clock).cpu.watts, None);
-        assert!(monitor.cpu_power_pending());
+        let first = monitor.poll(&fs, None, &clock);
+        assert_eq!((first.cpu.watts, first.cpu.usage_percent), (None, None));
+        assert_eq!(
+            monitor.settle_time(),
+            Some(crate::rapl::WINDOW),
+            "the longer wait wins"
+        );
 
         fs.set("/sys/class/powercap/intel-rapl:0/energy_uj", "1024680000");
+        fs.set("/proc/stat", "cpu  1100 0 630 9750 220 0 0 0 0 0\n");
         clock.advance(2);
-        assert_eq!(monitor.poll(&fs, None, &clock).cpu.watts, Some(12.3));
-        assert!(!monitor.cpu_power_pending());
+        let second = monitor.poll(&fs, None, &clock);
+        assert_eq!(second.cpu.watts, Some(12.3));
+        assert_eq!(second.cpu.usage_percent, Some(23.0));
+        assert_eq!(monitor.settle_time(), None);
+    }
+
+    #[test]
+    fn as_a_normal_user_only_usage_needs_to_settle() {
+        let fs =
+            FakeFs::new(PHN16_72).with_unreadable("/sys/class/powercap/intel-rapl:0/energy_uj");
+        let mut monitor = Monitor::new(&fs);
+        monitor.poll(&fs, None, &FakeClock::default());
+        assert_eq!(monitor.settle_time(), Some(cpu::USAGE_SETTLE));
     }
 
     #[test]
@@ -270,6 +350,7 @@ mod tests {
                 state: GpuState::None,
                 celsius: None,
                 watts: None,
+                usage_percent: None,
             }
         );
     }
@@ -287,12 +368,19 @@ mod tests {
                 state: GpuState::On,
                 celsius: Some(50.0),
                 watts: None,
+                usage_percent: Some(12.0),
             }
         );
         assert!(status.fans.is_empty());
         assert!(!status.profile.available);
         assert_eq!(status.power.battery, None);
         assert_eq!(status.temperatures.len(), 4);
+        assert_eq!(
+            status.cpu.usage_percent, None,
+            "no /proc/stat in this fixture"
+        );
+        assert_eq!(status.cpu.average_ghz, None);
+        assert!(status.devices.is_empty());
     }
 
     #[test]

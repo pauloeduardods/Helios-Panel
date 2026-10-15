@@ -343,7 +343,25 @@ fn properties_reflect_the_sysfs_tree() {
         let fans: Vec<(String, i32)> = h.get(SENSORS, "Fans").await;
         assert_eq!(fans, [("Fan 1".into(), 2350), ("Fan 2".into(), 2600)]);
         let temps: Vec<(String, String, String, f64)> = h.get(SENSORS, "Temperatures").await;
-        assert_eq!(temps.len(), 4);
+        assert_eq!(temps.len(), 8);
+        let devices: Vec<(String, String, f64)> = h.get(SENSORS, "Devices").await;
+        assert_eq!(
+            devices,
+            [
+                ("storage".into(), "CT500P2SSD8".into(), 44.9),
+                ("storage".into(), "SAMSUNG MZVL21T0HCLR-00B07".into(), 47.9),
+                ("wifi".into(), "Wi-Fi".into(), 52.0),
+            ]
+        );
+        assert_eq!(
+            h.get::<(bool, f64, f64)>(SENSORS, "CpuFrequency").await,
+            (true, 2.1, 4.8)
+        );
+        assert_eq!(
+            h.get::<(bool, f64)>(SENSORS, "GpuUsage").await,
+            (false, 0.0),
+            "the GPU is asleep"
+        );
         assert_eq!(
             h.get::<(bool, f64)>(SENSORS, "GpuPower").await,
             (false, 0.0)
@@ -374,7 +392,7 @@ fn properties_reflect_the_sysfs_tree() {
             ]
         );
 
-        assert_eq!(h.get::<u32>(DAEMON, "ApiVersion").await, 3);
+        assert_eq!(h.get::<u32>(DAEMON, "ApiVersion").await, 4);
         assert_eq!(
             h.get::<String>(DAEMON, "Version").await,
             env!("CARGO_PKG_VERSION")
@@ -574,6 +592,16 @@ fn cpu_power_is_averaged_over_the_window() {
             .wait_for(SENSORS, "CpuPower", |p: &(bool, f64)| p.0 && p.1 > 0.0)
             .await;
         assert!(watts <= 50.0, "{watts} W over less than 2 s");
+    });
+}
+
+#[test]
+fn cpu_usage_is_published_once_proc_stat_moves() {
+    async_io::block_on(async {
+        let h = Harness::start(Polkit::Allow).await;
+        h.write("proc/stat", "cpu  1100 0 630 9750 220 0 0 0 0 0\n");
+        let usage = h.wait_for(SENSORS, "CpuUsage", |u: &(bool, f64)| u.0).await;
+        assert_eq!(usage, (true, 23.0));
     });
 }
 

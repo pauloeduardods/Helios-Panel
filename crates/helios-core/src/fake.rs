@@ -21,6 +21,43 @@ pub const PHN16_72: &[(&str, &str)] = &[
     ("/sys/class/hwmon/hwmon5/temp1_label", "Package id 0"),
     ("/sys/class/hwmon/hwmon5/temp2_input", "58000"),
     ("/sys/class/hwmon/hwmon5/temp2_label", "Core 0"),
+    // Two NVMe drives (both chips are just "nvme") and the Wi-Fi card.
+    ("/sys/class/hwmon/hwmon4/name", "nvme"),
+    ("/sys/class/hwmon/hwmon4/temp1_input", "47850"),
+    ("/sys/class/hwmon/hwmon4/temp1_label", "Composite"),
+    ("/sys/class/hwmon/hwmon4/temp2_input", "47850"),
+    ("/sys/class/hwmon/hwmon4/temp2_label", "Sensor 1"),
+    (
+        "/sys/class/hwmon/hwmon4/device/model",
+        "SAMSUNG MZVL21T0HCLR-00B07              ",
+    ),
+    ("/sys/class/hwmon/hwmon6/name", "nvme"),
+    ("/sys/class/hwmon/hwmon6/temp1_input", "44850"),
+    ("/sys/class/hwmon/hwmon6/temp1_label", "Composite"),
+    ("/sys/class/hwmon/hwmon6/device/model", "CT500P2SSD8"),
+    ("/sys/class/hwmon/hwmon10/name", "iwlwifi_1_6"),
+    ("/sys/class/hwmon/hwmon10/temp1_input", "52000"),
+    // 32 threads in the real machine; four policies are enough here.
+    (
+        "/proc/stat",
+        "cpu  1000 0 500 9000 200 0 0 0 0 0\ncpu0 1 1 1 1\n",
+    ),
+    (
+        "/sys/devices/system/cpu/cpufreq/policy0/scaling_cur_freq",
+        "800000",
+    ),
+    (
+        "/sys/devices/system/cpu/cpufreq/policy1/scaling_cur_freq",
+        "1200000",
+    ),
+    (
+        "/sys/devices/system/cpu/cpufreq/policy2/scaling_cur_freq",
+        "1600000",
+    ),
+    (
+        "/sys/devices/system/cpu/cpufreq/policy3/scaling_cur_freq",
+        "4800000",
+    ),
     ("/sys/bus/pci/devices/0000:00:02.0/vendor", "0x8086"),
     ("/sys/bus/pci/devices/0000:00:02.0/class", "0x030000"),
     ("/sys/bus/pci/devices/0000:01:00.1/vendor", "0x10de"),
@@ -144,6 +181,7 @@ pub const AMD_DESKTOP: &[(&str, &str)] = &[
     ("/sys/class/hwmon/hwmon4/temp1_label", "edge"),
     ("/sys/class/hwmon/hwmon4/temp2_input", "60000"),
     ("/sys/class/hwmon/hwmon4/temp2_label", "junction"),
+    ("/sys/class/hwmon/hwmon4/device/gpu_busy_percent", "12"),
 ];
 
 /// In-memory sysfs. Directories are implied by file paths. Writes are only
@@ -292,7 +330,7 @@ mod tests {
         let fs = FakeFs::new(PHN16_72);
         assert_eq!(
             fs.read_dir("/sys/class/hwmon"),
-            ["hwmon0", "hwmon3", "hwmon5"]
+            ["hwmon0", "hwmon10", "hwmon3", "hwmon4", "hwmon5", "hwmon6"]
         );
         assert!(fs.exists("/sys/class/hwmon/hwmon3"));
         assert!(!fs.exists("/sys/class/hwmon/hwmon9"));

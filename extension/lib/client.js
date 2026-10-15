@@ -7,7 +7,7 @@
 import GLib from 'gi://GLib';
 import Gio from 'gi://Gio';
 
-import {powerFromDbus, profileFromDbus, sensorsFromDbus} from './model.js';
+import {powerFromDbus, profileFromDbus, sensorsFromDbus, usageFromDbus} from './model.js';
 
 export const BUS_NAME = 'io.github.pauloeduardods.Helios1';
 export const OBJECT_PATH = '/io/github/pauloeduardods/Helios1';
@@ -30,6 +30,10 @@ const INTROSPECTION = `
     <property name="Temperatures" type="a(sssd)" access="read"/>
     <property name="GpuPower" type="(bd)" access="read"/>
     <property name="CpuPower" type="(bd)" access="read"/>
+    <property name="CpuUsage" type="(bd)" access="read"/>
+    <property name="CpuFrequency" type="(bdd)" access="read"/>
+    <property name="GpuUsage" type="(bd)" access="read"/>
+    <property name="Devices" type="a(ssd)" access="read"/>
     <property name="PowerSource" type="s" access="read"/>
     <property name="Battery" type="(ssdddii)" access="read"/>
   </interface>
@@ -116,7 +120,8 @@ export class HeliosClient {
         return {
             state: this._state,
             version: p ? cachedProps(p.daemon, ['Version']).Version ?? null : null,
-            sensors: sensorsFromDbus(p ? cachedProps(p.sensors, ['Cpu', 'Gpu', 'Fans', 'Temperatures']) : {}),
+            sensors: sensorsFromDbus(p ? cachedProps(p.sensors, ['Cpu', 'Gpu', 'Fans', 'Temperatures', 'Devices']) : {}),
+            usage: usageFromDbus(p ? cachedProps(p.sensors, ['CpuUsage', 'CpuFrequency', 'GpuUsage']) : {}),
             power: powerFromDbus(p ? cachedProps(p.sensors, ['GpuPower', 'CpuPower', 'PowerSource', 'Battery']) : {}),
             profile: profileFromDbus(p ? cachedProps(p.profile, ['Available', 'Active', 'Choices', 'Driver']) : {}),
         };
