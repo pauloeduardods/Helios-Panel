@@ -276,6 +276,60 @@ export function sparklinePieces(history, name, width, height,
     return pieces;
 }
 
+/** Series in percent: their bars always span 0–100 %. */
+const PERCENT_SERIES = Object.freeze(['cpu-usage', 'gpu-usage']);
+
+/**
+ * A bar graph in a width × height box (y grows down): the window is split
+ * into slots of `barWidth` pixels plus a `gap`, newest at the right, and
+ * each slot draws the highest reading it holds as one bar with its `level`.
+ * Usage spans 0–100 %; anything else spans its readings like a sparkline,
+ * with some room below so the lowest bar is still visible. Empty slots draw
+ * nothing.
+ */
+export function barPieces(history, name, width, height,
+    {windowS = HISTORY_SPAN_S, levelOf = () => Level.NORMAL, barWidth = 3, gap = 1} = {}) {
+    const values = history?.series[name] ?? [];
+    const step = barWidth + gap;
+    const slots = Math.max(1, Math.floor((width + gap) / step));
+    const peaks = new Array(slots).fill(null);
+    values.forEach((v, i) => {
+        const age = history.ages[i];
+        if (v === null || age > windowS)
+            return;
+        const slot = slots - 1 - Math.min(slots - 1, Math.floor(age / (windowS / slots)));
+        if (peaks[slot] === null || v > peaks[slot])
+            peaks[slot] = v;
+    });
+    const known = peaks.filter(v => v !== null);
+    if (known.length === 0)
+        return [];
+    let low, high;
+    if (PERCENT_SERIES.includes(name)) {
+        [low, high] = [0, 100];
+    } else {
+        low = Math.min(...known);
+        high = Math.max(...known);
+        const minRange = SPARKLINE_MIN_RANGE[name] ?? 1;
+        if (high - low < minRange) {
+            const mid = (high + low) / 2;
+            low = mid - minRange / 2;
+            high = mid + minRange / 2;
+        }
+        low -= (high - low) / 3;
+    }
+    const left = width - slots * step + gap;
+    const bars = [];
+    peaks.forEach((v, slot) => {
+        if (v === null)
+            return;
+        const fraction = Math.max(0, Math.min(1, (v - low) / (high - low)));
+        const h = Math.max(1, Math.round(fraction * height));
+        bars.push({x: left + slot * step, y: height - h, width: barWidth, height: h, level: levelOf(v)});
+    });
+    return bars;
+}
+
 /** The point runs of a single-color sparkline over the whole span. */
 export function sparklineSegments(history, name, width, height) {
     return sparklinePieces(history, name, width, height).map(p => p.points);
