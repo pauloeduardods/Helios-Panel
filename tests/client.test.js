@@ -20,6 +20,7 @@ beforeEach(() => {
                 Fans: [['Fan 1', 2350]],
                 Temperatures: [],
                 GpuPower: [false, 0],
+                CpuPower: [true, 12.3],
                 PowerSource: 'ac',
                 Battery: ['BAT1', 'not-charging', 80, 0, 92, 0, -1],
             },
@@ -85,6 +86,7 @@ test('running: properties come from the proxies', async () => {
     assert.equal(snap.sensors.gpu.state, 'off');
     assert.equal(snap.power.source, 'ac');
     assert.equal(snap.power.battery.health, 92);
+    assert.equal(snap.power.cpuWatts, 12.3);
     assert.equal(snap.profile.current, 'balanced');
 });
 

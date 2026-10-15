@@ -119,6 +119,7 @@ class HeliosIndicator extends PanelMenu.Button {
             battery: makeInfoRow('Battery'),
             draw: makeInfoRow('Draw'),
             timeLeft: makeInfoRow('Time left'),
+            cpu: makeInfoRow('CPU draw'),
             gpu: makeInfoRow('GPU draw'),
             health: makeInfoRow('Battery health'),
         };
@@ -269,6 +270,7 @@ class HeliosIndicator extends PanelMenu.Button {
             : null);
         show(rows.draw, discharging ? formatWatts(battery.watts) : null);
         show(rows.timeLeft, discharging && battery.minutesLeft !== null ? formatDuration(battery.minutesLeft) : null);
+        show(rows.cpu, power.cpuWatts === null ? null : formatWatts(power.cpuWatts));
         show(rows.gpu, power.gpuWatts === null ? null : formatWatts(power.gpuWatts));
         show(rows.health, battery && battery.health !== null
             ? `${Math.round(battery.health)}%${battery.cycles ? ` · ${battery.cycles} cycles` : ''}`

@@ -29,6 +29,7 @@ const INTROSPECTION = `
     <property name="Fans" type="a(si)" access="read"/>
     <property name="Temperatures" type="a(sssd)" access="read"/>
     <property name="GpuPower" type="(bd)" access="read"/>
+    <property name="CpuPower" type="(bd)" access="read"/>
     <property name="PowerSource" type="s" access="read"/>
     <property name="Battery" type="(ssdddii)" access="read"/>
   </interface>
@@ -116,7 +117,7 @@ export class HeliosClient {
             state: this._state,
             version: p ? cachedProps(p.daemon, ['Version']).Version ?? null : null,
             sensors: sensorsFromDbus(p ? cachedProps(p.sensors, ['Cpu', 'Gpu', 'Fans', 'Temperatures']) : {}),
-            power: powerFromDbus(p ? cachedProps(p.sensors, ['GpuPower', 'PowerSource', 'Battery']) : {}),
+            power: powerFromDbus(p ? cachedProps(p.sensors, ['GpuPower', 'CpuPower', 'PowerSource', 'Battery']) : {}),
             profile: profileFromDbus(p ? cachedProps(p.profile, ['Available', 'Active', 'Choices', 'Driver']) : {}),
         };
     }

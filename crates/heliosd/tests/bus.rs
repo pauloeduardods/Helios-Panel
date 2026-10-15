@@ -32,6 +32,7 @@ const GPU_STATUS: &str = "sys/bus/pci/devices/0000:01:00.0/power/runtime_status"
 const CLASS_PROFILE: &str = "sys/class/platform-profile/platform-profile-0/profile";
 const LEGACY_PROFILE: &str = "sys/firmware/acpi/platform_profile";
 const CPU_TEMP: &str = "sys/class/hwmon/hwmon5/temp1_input";
+const RAPL_ENERGY: &str = "sys/class/powercap/intel-rapl:0/energy_uj";
 const AC_ONLINE: &str = "sys/class/power_supply/ACAD/online";
 const BAT: &str = "sys/class/power_supply/BAT1";
 
@@ -347,6 +348,11 @@ fn properties_reflect_the_sysfs_tree() {
             h.get::<(bool, f64)>(SENSORS, "GpuPower").await,
             (false, 0.0)
         );
+        assert_eq!(
+            h.get::<(bool, f64)>(SENSORS, "CpuPower").await,
+            (false, 0.0),
+            "one read of the counter is not enough"
+        );
         assert_eq!(h.get::<String>(SENSORS, "PowerSource").await, "ac");
         assert_eq!(
             h.get::<Battery>(SENSORS, "Battery").await,
@@ -368,7 +374,7 @@ fn properties_reflect_the_sysfs_tree() {
             ]
         );
 
-        assert_eq!(h.get::<u32>(DAEMON, "ApiVersion").await, 2);
+        assert_eq!(h.get::<u32>(DAEMON, "ApiVersion").await, 3);
         assert_eq!(
             h.get::<String>(DAEMON, "Version").await,
             env!("CARGO_PKG_VERSION")
@@ -554,6 +560,20 @@ fn unplugging_publishes_the_battery_draw() {
             )
         );
         assert_eq!(h.get::<String>(SENSORS, "PowerSource").await, "battery");
+    });
+}
+
+#[test]
+fn cpu_power_is_averaged_over_the_window() {
+    async_io::block_on(async {
+        let h = Harness::start(Polkit::Allow).await;
+        // 100 J more than at startup; heliosd polls every 100 ms here but
+        // still averages over at least 2 s, so this is at most 50 W.
+        h.write(RAPL_ENERGY, "1100000000\n");
+        let (_, watts) = h
+            .wait_for(SENSORS, "CpuPower", |p: &(bool, f64)| p.0 && p.1 > 0.0)
+            .await;
+        assert!(watts <= 50.0, "{watts} W over less than 2 s");
     });
 }
 

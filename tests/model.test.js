@@ -68,12 +68,14 @@ test('heliosd power becomes a plain object', () => {
     // A PHN16-72 on AC with the battery held at 80%.
     const ac = powerFromDbus({
         GpuPower: [true, 1.9],
+        CpuPower: [true, 12.3],
         PowerSource: 'ac',
         Battery: ['BAT1', 'not-charging', 80, 0, 92, 0, -1],
     });
     assert.deepEqual(ac, {
         source: 'ac',
         gpuWatts: 1.9,
+        cpuWatts: 12.3,
         battery: {
             name: 'BAT1', state: 'not-charging', percent: 80, watts: 0,
             health: 92, cycles: null, minutesLeft: null,
@@ -87,6 +89,7 @@ test('heliosd power becomes a plain object', () => {
         Battery: ['BAT1', 'discharging', 80, 24.5, 92, 312, 172],
     });
     assert.equal(onBattery.gpuWatts, null);
+    assert.equal(onBattery.cpuWatts, null, 'API v2: no CpuPower');
     assert.equal(onBattery.battery.cycles, 312);
     assert.equal(onBattery.battery.minutesLeft, 172);
     assert.equal(powerPanelText(onBattery), '24.5 W');
@@ -98,7 +101,7 @@ test('heliosd power becomes a plain object', () => {
 
 test('an older heliosd without power properties shows nothing', () => {
     const none = powerFromDbus({});
-    assert.deepEqual(none, {source: 'unknown', gpuWatts: null, battery: null});
+    assert.deepEqual(none, {source: 'unknown', gpuWatts: null, cpuWatts: null, battery: null});
     assert.equal(powerPanelText(none), null);
     assert.deepEqual(powerFromDbus(), none);
     assert.equal(powerFromDbus({Battery: ['', 'unknown', -1, -1, -1, -1, -1]}).battery, null);

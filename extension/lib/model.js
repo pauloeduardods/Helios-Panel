@@ -106,15 +106,18 @@ function known(value) {
 }
 
 /**
- * Power source, battery and GPU draw (API v2). An older heliosd has none of
- * these properties: the source is 'unknown' and there is no battery.
+ * Power source, battery and GPU draw (API v2), CPU draw (API v3). An older
+ * heliosd lacks some or all of these: missing draws are null, the source is
+ * 'unknown' and there is no battery.
  */
-export function powerFromDbus({GpuPower, PowerSource, Battery} = {}) {
+export function powerFromDbus({GpuPower, CpuPower, PowerSource, Battery} = {}) {
     const [gpuValid = false, gpuWatts = 0] = GpuPower ?? [];
+    const [cpuValid = false, cpuWatts = 0] = CpuPower ?? [];
     const [name = '', state = 'unknown', percent, watts, health, cycles, minutesLeft] = Battery ?? [];
     return {
         source: PowerSource || 'unknown',
         gpuWatts: gpuValid ? known(gpuWatts) : null,
+        cpuWatts: cpuValid ? known(cpuWatts) : null,
         battery: name ? {
             name,
             state,

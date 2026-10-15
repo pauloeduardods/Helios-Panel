@@ -19,15 +19,16 @@ use zbus::{Connection, interface};
 
 use crate::polkit::{self, SET_PROFILE_ACTION};
 use crate::props::{
-    self, Battery, Changes, Cpu, Fan, Gpu, GpuPower, ProfileProps, SensorsProps, Temperature,
+    self, Battery, Changes, Cpu, CpuPower, Fan, Gpu, GpuPower, ProfileProps, SensorsProps,
+    Temperature,
 };
 
 pub const BUS_NAME: &str = "io.github.pauloeduardods.Helios1";
 pub const OBJECT_PATH: &str = "/io/github/pauloeduardods/Helios1";
 pub const SENSORS_IFACE: &str = "io.github.pauloeduardods.Helios1.Sensors";
 pub const PROFILE_IFACE: &str = "io.github.pauloeduardods.Helios1.Profile";
-/// 2 added GpuPower, PowerSource and Battery to Sensors.
-pub const API_VERSION: u32 = 2;
+/// 2 added GpuPower, PowerSource and Battery to Sensors; 3 added CpuPower.
+pub const API_VERSION: u32 = 3;
 
 /// Firmware profile switches are not instant; do not hammer the EC.
 const MIN_WRITE_GAP: Duration = Duration::from_millis(250);
@@ -182,6 +183,11 @@ impl SensorsIface {
     #[zbus(property)]
     fn gpu_power(&self) -> GpuPower {
         self.0.sensors().gpu_power
+    }
+
+    #[zbus(property)]
+    fn cpu_power(&self) -> CpuPower {
+        self.0.sensors().cpu_power
     }
 
     #[zbus(property)]
