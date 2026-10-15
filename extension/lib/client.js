@@ -7,7 +7,9 @@
 import GLib from 'gi://GLib';
 import Gio from 'gi://Gio';
 
-import {powerFromDbus, profileFromDbus, sensorsFromDbus, usageFromDbus} from './model.js';
+import {
+    historyFromDbus, powerFromDbus, profileFromDbus, sensorsFromDbus, usageFromDbus,
+} from './model.js';
 
 export const BUS_NAME = 'io.github.pauloeduardods.Helios1';
 export const OBJECT_PATH = '/io/github/pauloeduardods/Helios1';
@@ -16,6 +18,9 @@ const ERROR_PREFIX = `${IFACE}.Error.`;
 
 /** Polkit may show a password prompt, so this call can take a while. */
 const SET_PROFILE_TIMEOUT_MS = 120000;
+
+/** GetHistory only copies memory; anything slower is a stuck daemon. */
+const HISTORY_TIMEOUT_MS = 2000;
 
 const INTROSPECTION = `
 <node>
@@ -34,6 +39,10 @@ const INTROSPECTION = `
     <property name="CpuFrequency" type="(bdd)" access="read"/>
     <property name="GpuUsage" type="(bd)" access="read"/>
     <property name="Devices" type="a(ssd)" access="read"/>
+    <method name="GetHistory">
+      <arg name="ages" type="ad" direction="out"/>
+      <arg name="series" type="a(sabad)" direction="out"/>
+    </method>
     <property name="PowerSource" type="s" access="read"/>
     <property name="Battery" type="(ssdddii)" access="read"/>
   </interface>
@@ -127,24 +136,44 @@ export class HeliosClient {
         };
     }
 
+    _call(proxy, method, params, timeoutMs) {
+        return new Promise((resolve, reject) => {
+            proxy.call(method, params, Gio.DBusCallFlags.NONE, timeoutMs, this._cancellable,
+                (_proxy, result) => {
+                    try {
+                        resolve(proxy.call_finish(result));
+                    } catch (e) {
+                        reject(e);
+                    }
+                });
+        });
+    }
+
     /** Rejects with a HeliosError. */
     async setProfile(id) {
         const proxy = this._proxies?.profile;
         if (!proxy)
             throw new HeliosError('NotRunning', 'heliosd is not running');
         try {
-            await new Promise((resolve, reject) => {
-                proxy.call('SetProfile', new GLib.Variant('(s)', [id]), Gio.DBusCallFlags.NONE,
-                    SET_PROFILE_TIMEOUT_MS, this._cancellable, (_proxy, result) => {
-                        try {
-                            resolve(proxy.call_finish(result));
-                        } catch (e) {
-                            reject(e);
-                        }
-                    });
-            });
+            await this._call(proxy, 'SetProfile', new GLib.Variant('(s)', [id]), SET_PROFILE_TIMEOUT_MS);
         } catch (e) {
             throw toHeliosError(e);
+        }
+    }
+
+    /**
+     * The last five minutes (see historyFromDbus), or null when heliosd is
+     * not running, is older than API v5, or the call failed.
+     */
+    async history() {
+        const proxy = this._proxies?.sensors;
+        if (!proxy)
+            return null;
+        try {
+            const reply = await this._call(proxy, 'GetHistory', null, HISTORY_TIMEOUT_MS);
+            return historyFromDbus(reply?.deepUnpack());
+        } catch {
+            return null;
         }
     }
 

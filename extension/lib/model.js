@@ -118,6 +118,77 @@ export function usageFromDbus({CpuUsage, CpuFrequency, GpuUsage} = {}) {
     };
 }
 
+// ---- history --------------------------------------------------------------
+
+/** How far back heliosd keeps readings, in seconds. */
+export const HISTORY_SPAN_S = 300;
+
+/**
+ * GetHistory's reply (API v5) as {ages, series}: ages in seconds before now,
+ * oldest first, and per series name the values aligned with them (null where
+ * there was no reading).
+ */
+export function historyFromDbus(reply) {
+    const [ages = [], series = []] = reply ?? [];
+    const out = {ages, series: {}};
+    for (const [name, valid, values] of series)
+        out.series[name] = values.map((v, i) => (valid[i] ? v : null));
+    return out;
+}
+
+/**
+ * The smallest range a sparkline spans, per series, so a 0.1 °C wobble is
+ * not drawn as a cliff.
+ */
+const SPARKLINE_MIN_RANGE = Object.freeze({
+    'cpu-celsius': 10,
+    'gpu-celsius': 10,
+    'cpu-usage': 20,
+    'gpu-usage': 20,
+    'cpu-watts': 5,
+    'battery-watts': 5,
+});
+
+/**
+ * Polylines for one series in a width × height box (y grows down): the
+ * newest sample on the right edge, the span's start on the left, one run of
+ * [x, y] points per stretch without gaps. Empty when there is no reading.
+ */
+export function sparklineSegments(history, name, width, height) {
+    const values = history?.series[name] ?? [];
+    const known = values.filter(v => v !== null);
+    if (known.length === 0)
+        return [];
+    let low = Math.min(...known);
+    let high = Math.max(...known);
+    const minRange = SPARKLINE_MIN_RANGE[name] ?? 0;
+    if (high - low < minRange) {
+        const mid = (high + low) / 2;
+        low = mid - minRange / 2;
+        high = mid + minRange / 2;
+    }
+    const pad = 1;
+    const y = v => (high > low
+        ? pad + (1 - (v - low) / (high - low)) * (height - 2 * pad)
+        : height / 2);
+    const x = age => (1 - Math.min(age, HISTORY_SPAN_S) / HISTORY_SPAN_S) * width;
+
+    const segments = [];
+    let run = [];
+    values.forEach((v, i) => {
+        if (v === null) {
+            if (run.length)
+                segments.push(run);
+            run = [];
+        } else {
+            run.push([x(history.ages[i]), y(v)]);
+        }
+    });
+    if (run.length)
+        segments.push(run);
+    return segments;
+}
+
 export function formatPercent(percent) {
     if (percent === null || percent === undefined || !Number.isFinite(percent))
         return '--';

@@ -67,6 +67,7 @@ crates/
 │   ├── src/nvidia.rs        PCI lookup, runtime-PM gate, query interval
 │   ├── src/power.rs         power source, laptop battery, averaged draw
 │   ├── src/cpu.rs           CPU usage from /proc/stat, clock from cpufreq
+│   ├── src/history.rs       in-memory ring buffer of the last 5 min for the sparklines
 │   ├── src/rapl.rs          CPU package draw from the RAPL counter, 2 s minimum window
 │   ├── src/profile.rs       platform profile state, validation, write path
 │   ├── src/status.rs        Status struct (serde) shared by CLI JSON and daemon
@@ -183,7 +184,7 @@ All properties are read-only and emit `org.freedesktop.DBus.Properties.Propertie
 | Member | Type | Meaning |
 |---|---|---|
 | `Version` | `s` | heliosd version, e.g. `0.2.0` |
-| `ApiVersion` | `u` | `4`; raised for compatible additions (2 added `GpuPower`, `PowerSource`, `Battery`; 3 added `CpuPower`; 4 added `CpuUsage`, `CpuFrequency`, `GpuUsage`, `Devices`) |
+| `ApiVersion` | `u` | `4`; raised for compatible additions (2 added `GpuPower`, `PowerSource`, `Battery`; 3 added `CpuPower`; 4 added `CpuUsage`, `CpuFrequency`, `GpuUsage`, `Devices`; 5 added `GetHistory`) |
 
 ### `io.github.pauloeduardods.Helios1.Sensors`
 
@@ -201,6 +202,7 @@ All properties are read-only and emit `org.freedesktop.DBus.Properties.Propertie
 | `Devices` | `a(ssd)` | drives and network cards: (kind `storage`/`wifi`, name, °C), sorted by kind then name; a drive's name is its model, so two `nvme` chips are told apart; unreadable sensors are left out |
 | `PowerSource` | `s` | `ac`, `battery` or `unknown` (no system `Mains` supply and the battery is not discharging) |
 | `Battery` | `(ssdddii)` | (name, state `charging`/`discharging`/`full`/`not-charging`/`unknown`, %, W, health %, cycles, minutes left); name `""` = no battery, `-1` = unknown |
+| `GetHistory()` | method → `(ad, a(sabad))` | the last 5 minutes from memory (150 polls at most): ages in seconds before now, oldest first; then per series (name, valid flags, values) aligned with them. Series: `cpu-celsius`, `gpu-celsius`, `cpu-usage`, `gpu-usage`, `cpu-watts`, `battery-watts` (only while discharging). The extension calls it only while its menu is open. |
 
 The `valid` flag replaces NaN sentinels, so every frontend, including JSON-based
 ones, gets an explicit "no value".

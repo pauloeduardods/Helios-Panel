@@ -1,12 +1,16 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! heliosctl: read-only command-line client for Helios.
 
+use std::io::Write;
 use std::path::PathBuf;
 use std::process::ExitCode;
+use std::time::Duration;
 
 use helios_core::GpuQuery;
 use helios_core::doctor::{self, Level, Report};
+use helios_core::history::{History, Series, Snapshot};
 use helios_core::hwmon::DeviceKind;
+use helios_core::io::Clock;
 use helios_core::nvidia::GpuState;
 use helios_core::power::{BatteryState, PowerSource, PowerStatus};
 use helios_core::status::{Monitor, Status};
@@ -17,6 +21,8 @@ Usage: heliosctl <command>
 
 Commands:
   status [--json]   Show temperatures, fans, power, battery and the profile
+  status --watch    The same, refreshed every 2 s, with the last 2 minutes
+                    as small graphs (Ctrl+C to quit)
   doctor [--json]   Check what Helios needs and suggest fixes (changes nothing)
   help              Show this help
   version           Show the version
@@ -28,6 +34,7 @@ asleep is never woken. doctor exits with 1 when something needs attention.";
 #[derive(Debug, PartialEq, Eq)]
 enum Command {
     Status { json: bool },
+    Watch,
     Doctor { json: bool },
     Help,
     Version,
@@ -66,6 +73,7 @@ fn parse_args(args: impl IntoIterator<Item = String>) -> Result<Options, String>
         ["version"] => Command::Version,
         ["status"] => Command::Status { json: false },
         ["status", "--json"] => Command::Status { json: true },
+        ["status", "--watch"] => Command::Watch,
         ["doctor"] => Command::Doctor { json: false },
         ["doctor", "--json"] => Command::Doctor { json: true },
         [cmd @ ("status" | "doctor"), extra @ ..] => {
@@ -235,12 +243,16 @@ fn render(status: &Status) -> String {
     out
 }
 
-fn status(options: &Options, json: bool) -> Result<String, String> {
-    let fs = RootedFs::new(&options.sysfs_root);
-    let smi = match &options.nvidia_smi {
+fn find_smi(options: &Options) -> Option<NvidiaSmi> {
+    match &options.nvidia_smi {
         Some(path) => Some(NvidiaSmi::new(path, NvidiaSmi::DEFAULT_TIMEOUT)),
         None => NvidiaSmi::find(),
-    };
+    }
+}
+
+fn status(options: &Options, json: bool) -> Result<String, String> {
+    let fs = RootedFs::new(&options.sysfs_root);
+    let smi = find_smi(options);
     let smi = smi.as_ref().map(|s| s as &dyn GpuQuery);
     let clock = SystemClock::new();
     let mut monitor = Monitor::new(&fs);
@@ -256,6 +268,88 @@ fn status(options: &Options, json: bool) -> Result<String, String> {
             .map_err(|e| e.to_string())
     } else {
         Ok(render(&status))
+    }
+}
+
+/// How often `status --watch` polls, like heliosd.
+const WATCH_INTERVAL: Duration = Duration::from_secs(2);
+
+/// Samples shown per graph: two minutes at [`WATCH_INTERVAL`].
+const WATCH_WIDTH: usize = 60;
+
+const BLOCKS: [char; 8] = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
+
+/// One character per value, scaled between the lowest and highest value
+/// shown; a gap is a space.
+fn sparkline(values: &[Option<f64>]) -> String {
+    let known = values.iter().flatten();
+    let low = known.clone().copied().fold(f64::INFINITY, f64::min);
+    let high = known.copied().fold(f64::NEG_INFINITY, f64::max);
+    values
+        .iter()
+        .map(|v| match v {
+            None => ' ',
+            Some(_) if high <= low => BLOCKS[BLOCKS.len() / 2],
+            Some(v) => {
+                let step = ((v - low) / (high - low) * (BLOCKS.len() - 1) as f64).round();
+                BLOCKS[step as usize]
+            }
+        })
+        .collect()
+}
+
+/// Graph lines for every series that had a value in the window.
+fn render_history(snapshot: &Snapshot) -> String {
+    let mut out = String::new();
+    for data in &snapshot.series {
+        let start = data.values.len().saturating_sub(WATCH_WIDTH);
+        let values = &data.values[start..];
+        let known: Vec<f64> = values.iter().flatten().copied().collect();
+        if known.is_empty() {
+            continue;
+        }
+        let (name, unit) = match data.series {
+            Series::CpuCelsius => ("CPU", "°C"),
+            Series::GpuCelsius => ("GPU", "°C"),
+            Series::CpuUsage => ("CPU", "%"),
+            Series::GpuUsage => ("GPU", "%"),
+            Series::CpuWatts => ("CPU", "W"),
+            Series::BatteryWatts => ("Battery", "W"),
+        };
+        let low = known.iter().copied().fold(f64::INFINITY, f64::min);
+        let high = known.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+        out.push_str(&format!(
+            "{:<12}{:<width$}  {low:.0}–{high:.0}\n",
+            format!("{name} {unit}"),
+            sparkline(values),
+            width = WATCH_WIDTH,
+        ));
+    }
+    out
+}
+
+/// Polls until interrupted, redrawing the screen each time.
+fn watch(options: &Options) -> Result<String, String> {
+    let fs = RootedFs::new(&options.sysfs_root);
+    let smi = find_smi(options);
+    let smi = smi.as_ref().map(|s| s as &dyn GpuQuery);
+    let clock = SystemClock::new();
+    let mut monitor = Monitor::new(&fs);
+    let mut history = History::default();
+    let mut stdout = std::io::stdout();
+    loop {
+        let status = monitor.poll(&fs, smi, &clock);
+        history.record(clock.now(), &status);
+        let screen = format!(
+            "\x1b[H\x1b[2J{}\nLast 2 minutes\n{}\nRefreshing every 2 s, Ctrl+C to quit.\n",
+            render(&status),
+            render_history(&history.snapshot(clock.now())),
+        );
+        stdout
+            .write_all(screen.as_bytes())
+            .and_then(|()| stdout.flush())
+            .map_err(|e| e.to_string())?;
+        std::thread::sleep(WATCH_INTERVAL);
     }
 }
 
@@ -317,6 +411,7 @@ fn main() -> ExitCode {
         Command::Help => ok(format!("{USAGE}\n")),
         Command::Version => ok(format!("heliosctl {}\n", env!("CARGO_PKG_VERSION"))),
         Command::Status { json } => status(&options, json).and_then(ok),
+        Command::Watch => watch(&options).and_then(ok),
         Command::Doctor { json } => run_doctor(&options, json),
     };
     match result {
@@ -411,6 +506,7 @@ mod tests {
         assert!(parse(&["frobnicate"]).is_err());
         assert!(parse(&["status", "--yaml"]).unwrap_err().contains("--yaml"));
         assert!(parse(&["status", "--json", "extra"]).is_err());
+        assert!(parse(&["status", "--json", "--watch"]).is_err());
         assert!(parse(&["status", "--sysfs-root"]).is_err());
     }
 
@@ -483,6 +579,46 @@ Choices  low-power, quiet, balanced, balanced-performance, performance
         clock.advance(2);
         let text = render(&monitor.poll(&fs, Some(&smi), &clock));
         assert!(text.contains("\nUsage    CPU 23%, GPU 30%\n"), "{text}");
+    }
+
+    #[test]
+    fn watch_command() {
+        assert_eq!(
+            parse(&["status", "--watch"]).unwrap().command,
+            Command::Watch
+        );
+    }
+
+    #[test]
+    fn sparklines_scale_between_the_lowest_and_highest_value() {
+        assert_eq!(sparkline(&[Some(60.0), Some(70.0), Some(80.0)]), "▁▅█");
+        assert_eq!(sparkline(&[Some(1.0), None, Some(1.0)]), "▅ ▅", "flat");
+        assert_eq!(sparkline(&[None, None]), "  ");
+        assert_eq!(sparkline(&[]), "");
+    }
+
+    #[test]
+    fn history_lines_skip_series_without_values() {
+        let fs = FakeFs::new(PHN16_72);
+        let clock = FakeClock::starting_at(0);
+        let mut monitor = Monitor::new(&fs);
+        let mut history = History::default();
+        for milli in ["60000", "70000", "80000"] {
+            fs.set("/sys/class/hwmon/hwmon5/temp1_input", milli);
+            history.record(clock.now(), &monitor.poll(&fs, None, &clock));
+            clock.advance(2);
+        }
+        let text = render_history(&history.snapshot(clock.now()));
+        let names: Vec<_> = text.lines().map(|l| &l[..l.find("  ").unwrap()]).collect();
+        // The fixture's RAPL counter is readable and never moves: 0 W.
+        assert_eq!(
+            names,
+            ["CPU °C", "CPU W"],
+            "the asleep GPU is left out: {text}"
+        );
+        let cpu = text.lines().next().unwrap();
+        assert!(cpu.starts_with("CPU °C      ▁▅█ "), "{cpu}");
+        assert!(cpu.ends_with("  60–80"), "{cpu}");
     }
 
     #[test]

@@ -86,6 +86,8 @@ What goes where:
 
 Reading never needs root, with one exception: the RAPL counter behind the CPU draw is root-only. heliosd already runs as root and owns the file, so it needs no extra privilege, and it publishes that draw only as an average over at least 2 seconds rounded to 0.1 W (see below). `heliosctl status` run as a normal user shows no CPU draw. heliosd reads everything once every 2 seconds for all clients, and clients are told only when something changes.
 
+heliosd also keeps the last 5 minutes of CPU and GPU temperature, CPU and GPU usage, the CPU draw and the battery draw in memory (150 samples each, never written to disk). The menu draws them as small graphs under each value. It asks heliosd for them only while the menu is open.
+
 ### Why the CPU draw is coarse
 
 The kernel made RAPL root-only after the [PLATYPUS](https://platypusattack.com/) attack (CVE-2020-8694), which recovers secrets from fast, fine-grained energy samples. heliosd shares the reading with every user, so it never publishes anything finer than one 2-second average, rounded to 0.1 W: enough to see what the CPU draws, far too coarse for that attack.
@@ -114,6 +116,7 @@ busctl --system call io.github.pauloeduardods.Helios1 /io/github/pauloeduardods/
 ```bash
 heliosctl status          # human-readable
 heliosctl status --json   # machine-readable
+heliosctl status --watch  # refreshed every 2 s, with the last 2 minutes as small graphs
 heliosctl doctor          # check the setup and suggest fixes
 ```
 

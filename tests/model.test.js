@@ -6,7 +6,7 @@ import {
     Level, batteryStateLabel, daemonMessage, formatClock, formatDuration, formatPercent, formatRpm,
     formatTemp, formatWatts, pickCpu, pickGpu, powerFromDbus, powerPanelText, profileColor,
     profileFromDbus, profileLabel, sanitizeThresholds, sensorsFromDbus, setProfileError, tempLevel,
-    usageFromDbus,
+    usageFromDbus, historyFromDbus, sparklineSegments,
 } from '../extension/lib/model.js';
 
 // What heliosd publishes on a PHN16-72 with the NVIDIA GPU asleep.
@@ -180,4 +180,30 @@ test('SetProfile errors get readable messages', () => {
     assert.equal(setProfileError('NotRunning', 'x'), 'heliosd is not running');
     assert.equal(setProfileError('WriteFailed', 'writing failed: EIO'), 'writing failed: EIO');
     assert.equal(setProfileError('Failed', ''), 'Could not change the profile');
+});
+
+test('GetHistory becomes plain arrays with nulls for gaps', () => {
+    const h = historyFromDbus([[4, 2, 0], [['cpu-celsius', [true, false, true], [60, 0, 70]]]]);
+    assert.deepEqual(h, {ages: [4, 2, 0], series: {'cpu-celsius': [60, null, 70]}});
+    assert.deepEqual(historyFromDbus(undefined), {ages: [], series: {}});
+});
+
+test('sparklines span the window, split at gaps and never exaggerate noise', () => {
+    const history = {
+        ages: [300, 150, 2, 0],
+        series: {
+            'cpu-usage': [0, 100, null, 50],
+            'cpu-celsius': [61, 61.2, 61.1, 61],
+            'gpu-celsius': [null, null, null, null],
+        },
+    };
+    assert.deepEqual(sparklineSegments(history, 'cpu-usage', 100, 22), [
+        [[0, 21], [50, 1]],
+        [[100, 11]],
+    ]);
+    // 0.2 °C of noise is drawn within a 10 °C range: nearly flat in the middle.
+    const flat = sparklineSegments(history, 'cpu-celsius', 100, 22)[0].map(([, y]) => y);
+    assert.ok(flat.every(y => Math.abs(y - 11) < 0.5), String(flat));
+    assert.deepEqual(sparklineSegments(history, 'gpu-celsius', 100, 22), []);
+    assert.deepEqual(sparklineSegments(null, 'cpu-usage', 100, 22), []);
 });
