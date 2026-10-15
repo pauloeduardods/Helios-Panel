@@ -8,6 +8,8 @@ import {
     profileFromDbus, profileLabel, sanitizeThresholds, sensorsFromDbus, setProfileError, tempLevel,
     usageFromDbus, historyFromDbus, sparklineSegments, sparklinePieces, HistoryBuffer,
     historySample, normalizeOrder, moveItem, PANEL_ITEMS, parseColor,
+    KEYBOARD_EFFECTS, LIGHT_COLORS, effectLabel, keyboardRequest, lightingError, lightingFromDbus,
+    logoRequest,
 } from '../extension/lib/model.js';
 
 // What heliosd publishes on a PHN16-72 with the NVIDIA GPU asleep.
@@ -279,4 +281,73 @@ test('color settings parse for Cairo', () => {
     assert.equal(parseColor(''), null, 'empty = theme color');
     assert.equal(parseColor('tomato'), null);
     assert.equal(parseColor(undefined), null);
+});
+
+// ---------------------------------------------------------------- lighting
+
+test('lightingFromDbus: unavailable without the module or on an older heliosd', () => {
+    assert.deepEqual(lightingFromDbus({}),
+        {available: false, effects: [], directions: [], keyboard: null, logo: null});
+    assert.equal(lightingFromDbus({Keyboard: ['wave', 5, 100, 'left', '#000000']}).available, false);
+});
+
+test('lightingFromDbus: the keyboard and the logo', () => {
+    const l = lightingFromDbus({
+        Effects: ['breathing', 'neon', 'wave', 'shifting', 'zoom'],
+        Directions: ['left', 'right'],
+        Keyboard: ['zoom', 4, 80, 'right', '#ff00ff'],
+        Logo: [true, 100, '#00ff00'],
+    });
+    assert.equal(l.available, true);
+    assert.deepEqual(l.keyboard, {effect: 'zoom', speed: 4, brightness: 80, direction: 'right', color: '#ff00ff'});
+    assert.deepEqual(l.logo, {on: true, brightness: 100, color: '#00ff00'});
+    assert.deepEqual(l.directions, ['left', 'right']);
+});
+
+test('keyboardRequest changes one thing and keeps the rest', () => {
+    const current = {effect: 'zoom', speed: 4, brightness: 80, direction: 'right', color: '#ff00ff'};
+    assert.deepEqual(keyboardRequest(current, {effect: 'breathing'}), ['breathing', 4, 80, 'right', '#ff00ff']);
+    assert.deepEqual(keyboardRequest(current, {brightness: 33.4}), ['zoom', 4, 33, 'right', '#ff00ff']);
+    assert.deepEqual(keyboardRequest(current, {speed: 9 * 0.5}), ['zoom', 5, 80, 'right', '#ff00ff']);
+    assert.deepEqual(keyboardRequest(current, {direction: 'left'}), ['zoom', 4, 80, 'left', '#ff00ff']);
+    assert.deepEqual(keyboardRequest(current, {color: '#00ffff'}), ['zoom', 4, 80, 'right', '#00ffff']);
+});
+
+test('keyboardRequest never sends what heliosd would reject', () => {
+    // Static, or an effect set by another tool, falls back to defaults.
+    const odd = {effect: 'static', speed: 0, brightness: 100, direction: 'unknown', color: '#000000'};
+    assert.deepEqual(keyboardRequest(odd, {brightness: 50}), ['wave', 4, 50, 'right', '#ffffff']);
+    assert.deepEqual(keyboardRequest(null, {effect: 'neon'}), ['neon', 4, 100, 'right', '#ffffff']);
+    // Out-of-range slider values are clamped.
+    const current = {effect: 'wave', speed: 4, brightness: 80, direction: 'left', color: '#ff0000'};
+    assert.deepEqual(keyboardRequest(current, {brightness: 140, speed: -3}), ['wave', 0, 100, 'left', '#ff0000']);
+    for (const [effect, speed, brightness, direction, color] of [
+        keyboardRequest(odd, {}), keyboardRequest(current, {speed: 99}), keyboardRequest(undefined, {}),
+    ]) {
+        assert.ok(KEYBOARD_EFFECTS.includes(effect));
+        assert.ok(Number.isInteger(speed) && speed >= 0 && speed <= 9);
+        assert.ok(Number.isInteger(brightness) && brightness >= 0 && brightness <= 100);
+        assert.ok(direction === 'left' || direction === 'right');
+        assert.match(color, /^#[0-9a-f]{6}$/);
+    }
+});
+
+test('logoRequest: turning the logo on always shows something', () => {
+    assert.deepEqual(logoRequest({on: false, brightness: 0, color: '#000000'}, {on: true}), [true, 100, '#ffffff']);
+    assert.deepEqual(logoRequest({on: true, brightness: 70, color: '#00ff00'}, {on: false}), [false, 70, '#00ff00']);
+    assert.deepEqual(logoRequest({on: true, brightness: 70, color: '#00ff00'}, {color: '#ff0000'}), [true, 70, '#ff0000']);
+    assert.deepEqual(logoRequest({on: true, brightness: 70, color: '#00ff00'}, {brightness: 250}), [true, 100, '#00ff00']);
+    assert.deepEqual(logoRequest(null, {on: true}), [true, 100, '#ffffff']);
+});
+
+test('lighting labels and errors', () => {
+    assert.equal(effectLabel('shifting'), 'Shifting');
+    assert.equal(effectLabel('static'), 'Static');
+    assert.equal(effectLabel('unknown'), 'Other');
+    assert.equal(lightingError('NotAuthorized'), 'Not authorized to change the lighting');
+    assert.match(lightingError('Unavailable'), /heliosctl doctor/);
+    assert.equal(lightingError('Failed', 'Timeout was reached'), 'Timeout was reached');
+    assert.equal(LIGHT_COLORS.length, 9);
+    for (const {color} of LIGHT_COLORS)
+        assert.match(color, /^#[0-9a-f]{6}$/);
 });

@@ -1,9 +1,9 @@
 # Architecture
 
 > **Status:** helios-core, heliosctl, heliosd, the D-Bus extension and the
-> installer and `heliosctl doctor` are implemented. Lighting is in
-> progress: the kernel module and the heliosd interface are done, the
-> extension section is next (see the [migration plan](#migration-plan)).
+> installer, `heliosctl doctor` and lighting (keyboard effects and the lid
+> logo; the static keyboard effect is still open) are implemented (see the
+> [migration plan](#migration-plan)).
 
 ## Goals and scope
 
@@ -519,7 +519,7 @@ that uninstall leaves the tree byte-for-byte as it was.
 | 5 | `heliosctl doctor` (done) |
 | 6 | `install.sh` for extension + daemon, manifest-based `--uninstall` (done, before task 5) |
 | 7 | lighting research and API proposal (plan only): [LIGHTING.md](LIGHTING.md) (done) |
-| 8 | lighting, step 1: the `helios-acer-lighting` kernel module and the `doctor` check (done); step 2: heliosd `Lighting` interface (done); step 3: extension section |
+| 8 | lighting, step 1: the `helios-acer-lighting` kernel module and the `doctor` check (done); step 2: heliosd `Lighting` interface (done); step 3: extension section (done) |
 
 ## Decisions
 
