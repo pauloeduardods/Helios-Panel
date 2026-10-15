@@ -30,6 +30,8 @@ typedef uint8_t u8;
  */
 enum hal_method {
 	HAL_GET_STATE = 4,	/* read-only: keyboard and logo state registers */
+	HAL_SET_LOGO_MODE = 10,	/* logo animation (register LBET) */
+	HAL_GET_LOGO_MODE = 11,	/* read the above */
 	HAL_SET_LOGO = 12,	/* logo colour, brightness and power */
 	HAL_GET_LOGO = 13,	/* read the above */
 	HAL_SET_EFFECT = 20,	/* effect, speed, brightness, direction, colour */
@@ -39,6 +41,10 @@ enum hal_method {
 /* Exact input and output sizes, from the firmware's buffers. */
 #define HAL_GET_STATE_IN 8
 #define HAL_GET_STATE_OUT 16
+#define HAL_SET_LOGO_MODE_IN 8
+#define HAL_SET_LOGO_MODE_OUT 4
+#define HAL_GET_LOGO_MODE_IN 4
+#define HAL_GET_LOGO_MODE_OUT 8
 #define HAL_SET_LOGO_IN 8
 #define HAL_SET_LOGO_OUT 4
 #define HAL_GET_LOGO_IN 4
@@ -79,9 +85,13 @@ int hal_effect_store(const struct hal_fw *fw, const char *buf, size_t len);
 int hal_effect_show(const struct hal_fw *fw, char *buf);
 
 /*
- * logo: "<on> <brightness> <rrggbb>", on being 0 or 1. Writes the logo's
- * own colour registers (method 12), then its power through method 20 with
- * the logo target, as the PHN16-72 driver nekro-sense does.
+ * logo: "<on> <brightness> <rrggbb> <mode>", on being 0 or 1 and mode one
+ * of static, breathing (pulses in the colour) or cycle (cycles through the
+ * colours). The mode may be left out, meaning static. Writes the logo's own
+ * colour registers (method 12), then its power through method 20 with the
+ * logo target, as the PHN16-72 driver nekro-sense does, then the mode
+ * (method 10). Reads back all four; a mode value Helios does not set reads
+ * as "unknown".
  */
 int hal_logo_store(const struct hal_fw *fw, const char *buf, size_t len);
 int hal_logo_show(const struct hal_fw *fw, char *buf);

@@ -9,7 +9,7 @@ import {
     usageFromDbus, historyFromDbus, sparklineSegments, sparklinePieces, HistoryBuffer,
     historySample, normalizeOrder, moveItem, PANEL_ITEMS, parseColor,
     KEYBOARD_EFFECTS, LIGHT_COLORS, effectLabel, keyboardRequest, lightingError, lightingFromDbus,
-    logoRequest, powerSummary, usageSummary,
+    LOGO_MODES, logoModeLabel, logoRequest, powerSummary, usageSummary,
 } from '../extension/lib/model.js';
 
 // What heliosd publishes on a PHN16-72 with the NVIDIA GPU asleep.
@@ -287,20 +287,26 @@ test('color settings parse for Cairo', () => {
 
 test('lightingFromDbus: unavailable without the module or on an older heliosd', () => {
     assert.deepEqual(lightingFromDbus({}),
-        {available: false, effects: [], directions: [], keyboard: null, logo: null});
+        {available: false, effects: [], directions: [], logoModes: [], keyboard: null, logo: null});
     assert.equal(lightingFromDbus({Keyboard: ['wave', 5, 100, 'left', '#000000']}).available, false);
+    // heliosd before API 7: the logo has no mode, and SetLogo takes three arguments.
+    assert.equal(lightingFromDbus({
+        Keyboard: ['wave', 5, 100, 'left', '#000000'], Logo: [true, 100, '#00ff00'],
+    }).available, false);
 });
 
 test('lightingFromDbus: the keyboard and the logo', () => {
     const l = lightingFromDbus({
         Effects: ['breathing', 'neon', 'wave', 'shifting', 'zoom'],
         Directions: ['left', 'right'],
+        LogoModes: ['static', 'breathing', 'cycle'],
         Keyboard: ['zoom', 4, 80, 'right', '#ff00ff'],
-        Logo: [true, 100, '#00ff00'],
+        Logo: [true, 100, '#00ff00', 'cycle'],
     });
     assert.equal(l.available, true);
     assert.deepEqual(l.keyboard, {effect: 'zoom', speed: 4, brightness: 80, direction: 'right', color: '#ff00ff'});
-    assert.deepEqual(l.logo, {on: true, brightness: 100, color: '#00ff00'});
+    assert.deepEqual(l.logo, {on: true, brightness: 100, color: '#00ff00', mode: 'cycle'});
+    assert.deepEqual(l.logoModes, ['static', 'breathing', 'cycle']);
     assert.deepEqual(l.directions, ['left', 'right']);
 });
 
@@ -333,16 +339,31 @@ test('keyboardRequest never sends what heliosd would reject', () => {
 });
 
 test('logoRequest: turning the logo on always shows something', () => {
-    assert.deepEqual(logoRequest({on: false, brightness: 0, color: '#000000'}, {on: true}), [true, 100, '#ffffff']);
-    assert.deepEqual(logoRequest({on: true, brightness: 70, color: '#00ff00'}, {on: false}), [false, 70, '#00ff00']);
-    assert.deepEqual(logoRequest({on: true, brightness: 70, color: '#00ff00'}, {color: '#ff0000'}), [true, 70, '#ff0000']);
-    assert.deepEqual(logoRequest({on: true, brightness: 70, color: '#00ff00'}, {brightness: 250}), [true, 100, '#00ff00']);
-    assert.deepEqual(logoRequest(null, {on: true}), [true, 100, '#ffffff']);
+    const green = {on: true, brightness: 70, color: '#00ff00', mode: 'breathing'};
+    assert.deepEqual(logoRequest({on: false, brightness: 0, color: '#000000', mode: 'static'}, {on: true}),
+        [true, 100, '#ffffff', 'static']);
+    assert.deepEqual(logoRequest(green, {on: false}), [false, 70, '#00ff00', 'breathing']);
+    assert.deepEqual(logoRequest(green, {color: '#ff0000'}), [true, 70, '#ff0000', 'breathing']);
+    assert.deepEqual(logoRequest(green, {brightness: 250}), [true, 100, '#00ff00', 'breathing']);
+    assert.deepEqual(logoRequest(null, {on: true}), [true, 100, '#ffffff', 'static']);
+});
+
+test('logoRequest: the mode is kept, changed, or falls back to static', () => {
+    const logo = {on: true, brightness: 70, color: '#00ff00', mode: 'cycle'};
+    assert.deepEqual(logoRequest(logo, {brightness: 40}), [true, 40, '#00ff00', 'cycle']);
+    for (const mode of LOGO_MODES)
+        assert.deepEqual(logoRequest(logo, {mode}), [true, 70, '#00ff00', mode]);
+    // A value set by another tool reads back as unknown; it is never sent.
+    assert.deepEqual(logoRequest({...logo, mode: 'unknown'}, {}), [true, 70, '#00ff00', 'static']);
+    assert.deepEqual(logoRequest(logo, {mode: 'rainbow'}), [true, 70, '#00ff00', 'static']);
 });
 
 test('lighting labels and errors', () => {
     assert.equal(effectLabel('shifting'), 'Shifting');
     assert.equal(effectLabel('static'), 'Static');
+    assert.equal(logoModeLabel('cycle'), 'Color cycle');
+    assert.equal(logoModeLabel('breathing'), 'Breathing');
+    assert.equal(logoModeLabel('unknown'), 'Other');
     assert.equal(effectLabel('unknown'), 'Other');
     assert.equal(lightingError('NotAuthorized'), 'Not authorized to change the lighting');
     assert.match(lightingError('Unavailable'), /heliosctl doctor/);
