@@ -24,14 +24,12 @@ struct call {
 struct fake {
 	struct call calls[MAX_CALLS];
 	size_t count;
+	size_t pending_pauses;
 	int fail_at;		/* 1-based call number that fails; 0: never */
 	int fail_with;		/* errno to return, or 0 for a bad status byte */
-	size_t pending_pauses;
 	u8 effect[HAL_GET_EFFECT_OUT];
-	u8 zones[HAL_ZONES][3];
-	u8 kbst, lbst;
-	u8 logo_effect[HAL_GET_EFFECT_OUT];
 	u8 logo[HAL_GET_LOGO_OUT];
+	u8 kbst, lbst;
 };
 
 static int fake_call(void *ctx, enum hal_method method, const u8 *in, size_t in_len,
@@ -60,7 +58,7 @@ static int fake_call(void *ctx, enum hal_method method, const u8 *in, size_t in_
 	}
 	switch (method) {
 	case HAL_GET_EFFECT:
-		memcpy(out, in[0] == 2 ? f->logo_effect : f->effect, out_len);
+		memcpy(out, f->effect, out_len);
 		break;
 	case HAL_GET_LOGO:
 		memcpy(out, f->logo, out_len);
@@ -72,11 +70,6 @@ static int fake_call(void *ctx, enum hal_method method, const u8 *in, size_t in_
 			out[6] = f->lbst;
 		else
 			out[0] = 1;
-		break;
-	case HAL_GET_ZONE:
-		for (int z = 0; z < HAL_ZONES; z++)
-			if (in[0] == 1u << z)
-				memcpy(out + 1, f->zones[z], 3);
 		break;
 	default:
 		break;
@@ -121,9 +114,9 @@ static int effect_store(const char *line)
 	return hal_effect_store(&fw, line, strlen(line));
 }
 
-static int zones_store(const char *line)
+static int logo_store(const char *line)
 {
-	return hal_zones_store(&fw, line, strlen(line));
+	return hal_logo_store(&fw, line, strlen(line));
 }
 
 static void check_bytes(const struct call *c, const u8 *want, size_t len, const char *what)
@@ -135,9 +128,9 @@ static void check_bytes(const struct call *c, const u8 *want, size_t len, const 
 }
 
 /*
- * What must hold for every call, whatever the input: only the four
- * lighting methods, exact sizes, the keyboard as the only target, and
- * single-zone masks with the logo bytes left at zero.
+ * What must hold for every call, whatever the input: only the five
+ * lighting methods, exact sizes, never the static effect, and the logo
+ * target only for the logo's power call.
  */
 static void check_invariants(void)
 {
@@ -147,31 +140,22 @@ static void check_invariants(void)
 		switch (c->method) {
 		case HAL_SET_EFFECT:
 			CHECK(c->in_len == HAL_SET_EFFECT_IN, "method 20 size");
-			CHECK(c->in[9] == 1 || c->in[9] == 2, "method 20 target is %u", c->in[9]);
-			CHECK(c->in[0] <= 5, "effect %u", c->in[0]);
-			CHECK(c->in[1] <= 9, "speed %u", c->in[1]);
-			CHECK(c->in[2] <= 100, "brightness %u", c->in[2]);
-			CHECK(c->in[3] == 0, "byte 3 is %u", c->in[3]);
-			CHECK(c->in[4] <= 2, "direction %u", c->in[4]);
-			CHECK(c->in[8] == 3 || (c->in[9] == 2 && c->in[8] == 0), "byte 8 is %u", c->in[8]);
+			if (c->in[9] == 1) {
+				CHECK(c->in[0] >= 1 && c->in[0] <= 5, "keyboard effect %u", c->in[0]);
+				CHECK(c->in[1] <= 9, "speed %u", c->in[1]);
+				CHECK(c->in[2] <= 100, "brightness %u", c->in[2]);
+				CHECK(c->in[3] == 0, "byte 3 is %u", c->in[3]);
+				CHECK(c->in[4] == 1 || c->in[4] == 2, "direction %u", c->in[4]);
+				CHECK(c->in[8] == 3, "byte 8 is %u", c->in[8]);
+			} else if (c->in[9] == 2) {
+				CHECK(c->in[0] <= 1, "logo power %u", c->in[0]);
+				for (int b = 1; b < 9; b++)
+					CHECK(c->in[b] == 0, "logo power byte %d is %u", b, c->in[b]);
+			} else {
+				fail("method 20 target %u", c->in[9]);
+			}
 			for (int b = 10; b < 16; b++)
 				CHECK(c->in[b] == 0, "method 20 byte %d is %u", b, c->in[b]);
-			break;
-		case HAL_SET_ZONE:
-			CHECK(c->in_len == HAL_SET_ZONE_IN, "method 6 size");
-			CHECK(c->in[0] == 1 || c->in[0] == 2 || c->in[0] == 4 || c->in[0] == 8,
-			      "zone mask 0x%02x", c->in[0]);
-			for (int b = 4; b < 8; b++)
-				CHECK(c->in[b] == 0, "method 6 byte %d is %u", b, c->in[b]);
-			break;
-		case HAL_GET_EFFECT:
-			CHECK(c->in_len == HAL_GET_EFFECT_IN && (c->in[0] == 1 || c->in[0] == 2) &&
-			      c->in[1] == 0 &&
-			      c->in[2] == 0 && c->in[3] == 0, "method 21 input");
-			break;
-		case HAL_GET_ZONE:
-			CHECK(c->in_len == HAL_GET_ZONE_IN && c->in[1] == 0 && c->in[2] == 0 &&
-			      c->in[3] == 0, "method 7 input");
 			break;
 		case HAL_SET_LOGO:
 			CHECK(c->in_len == HAL_SET_LOGO_IN, "method 12 size");
@@ -180,28 +164,13 @@ static void check_invariants(void)
 			CHECK(c->in[5] <= 1, "logo power %u", c->in[5]);
 			CHECK(c->in[6] == 0 && c->in[7] == 0, "method 12 tail");
 			break;
+		case HAL_GET_EFFECT:
+			CHECK(c->in_len == HAL_GET_EFFECT_IN && c->in[0] == 1 && c->in[1] == 0 &&
+			      c->in[2] == 0 && c->in[3] == 0, "method 21 input");
+			break;
 		case HAL_GET_LOGO:
 			CHECK(c->in_len == HAL_GET_LOGO_IN && c->in[0] == 1 && c->in[1] == 0 &&
 			      c->in[2] == 0 && c->in[3] == 0, "method 13 input");
-			break;
-		case HAL_SET_STATE:
-			CHECK(c->in_len == HAL_SET_STATE_IN, "method 2 size");
-			if (c->in[0] == 0x08) {
-				CHECK(c->in[5] <= 15, "KBST value %u", c->in[5]);
-				for (int b = 1; b < 16; b++)
-					CHECK(b == 5 || c->in[b] == 0, "method 2 byte %d is %u",
-					      b, c->in[b]);
-			} else if (c->in[0] == 0x10) {
-				CHECK(c->in[6] == 0xf0 || c->in[6] == 0xf1, "LBST value 0x%02x",
-				      c->in[6]);
-				for (int b = 1; b < 16; b++) {
-					u8 want = b == 6 ? c->in[6] : (b >= 7 && b <= 13) ? 0xff : 0;
-
-					CHECK(c->in[b] == want, "method 2 byte %d is 0x%02x", b, c->in[b]);
-				}
-			} else {
-				fail("method 2 selector 0x%02x", c->in[0]);
-			}
 			break;
 		case HAL_GET_STATE:
 			CHECK(c->in_len == HAL_GET_STATE_IN, "method 4 size");
@@ -224,23 +193,26 @@ static void test_effect_bytes(void)
 	CHECK(effect_store("wave 4 80 right ff8000\n") == 0, "valid line rejected");
 	CHECK(fake.count == 1 && fake.calls[0].method == HAL_SET_EFFECT, "one method 20 call");
 	const u8 want[16] = { 3, 4, 80, 0, 2, 0xff, 0x80, 0x00, 3, 1 };
+
 	check_bytes(&fake.calls[0], want, 16, "wave");
+	CHECK(fake.calls[0].pauses_before == 0 && fake.pending_pauses == 0, "no pauses");
 }
 
 static void test_effect_names(void)
 {
-	static const char *const names[] = { "static", "breathing", "neon", "wave", "shifting", "zoom" };
+	static const char *const names[] = { "breathing", "neon", "wave", "shifting", "zoom" };
 	static const char *const dirs[] = { "left", "right" };
 	char line[64];
 
-	for (int e = 0; e < 6; e++) {
+	for (int e = 0; e < 5; e++) {
 		for (int d = 0; d < 2; d++) {
 			reset();
 			snprintf(line, sizeof(line), "%s 0 100 %s 00FFaa", names[e], dirs[d]);
 			CHECK(effect_store(line) == 0, "%s rejected", line);
 			CHECK(fake.count == 1, "%s: %zu calls", line, fake.count);
-			CHECK(fake.calls[0].in[0] == e, "%s: effect byte %u", line, fake.calls[0].in[0]);
-			CHECK(fake.calls[0].in[4] == d + 1, "%s: direction byte %u", line, fake.calls[0].in[4]);
+			CHECK(fake.calls[0].in[0] == e + 1, "%s: effect byte %u", line, fake.calls[0].in[0]);
+			CHECK(fake.calls[0].in[4] == d + 1, "%s: direction byte %u", line,
+			      fake.calls[0].in[4]);
 			CHECK(fake.calls[0].in[5] == 0x00 && fake.calls[0].in[6] == 0xff &&
 			      fake.calls[0].in[7] == 0xaa, "%s: colour", line);
 			check_invariants();
@@ -258,20 +230,19 @@ static void test_effect_ranges(void)
 		snprintf(line, sizeof(line), "breathing %d 50 left 000000", n);
 		int ret = effect_store(line);
 
-		if (n <= 9) {
+		if (n <= 9)
 			CHECK(ret == 0 && fake.count == 1 && fake.calls[0].in[1] == n, "speed %d", n);
-		} else {
+		else
 			CHECK(ret == -EINVAL && fake.count == 0, "speed %d accepted", n);
-		}
 
 		reset();
 		snprintf(line, sizeof(line), "breathing 5 %d left 000000", n);
 		ret = effect_store(line);
-		if (n <= 100) {
-			CHECK(ret == 0 && fake.count == 1 && fake.calls[0].in[2] == n, "brightness %d", n);
-		} else {
+		if (n <= 100)
+			CHECK(ret == 0 && fake.count == 1 && fake.calls[0].in[2] == n,
+			      "brightness %d", n);
+		else
 			CHECK(ret == -EINVAL && fake.count == 0, "brightness %d accepted", n);
-		}
 		check_invariants();
 	}
 }
@@ -281,6 +252,7 @@ static void test_effect_rejects(void)
 	static const char *const bad[] = {
 		"", "\n", "\n\n", "wave", "wave 4 80 right",
 		"wave 4 80 right ff0000 extra",
+		"static 0 100 right ff0000",
 		"Wave 4 80 right ff0000",
 		"meteor 4 80 right ff0000",
 		"twinkling 4 80 right ff0000",
@@ -317,7 +289,7 @@ static void test_effect_rejects(void)
 	}
 	current = "effect rejects";
 
-	/* An embedded NUL, and a line at the length limit. */
+	/* An embedded NUL, and a line past the length limit. */
 	reset();
 	CHECK(hal_effect_store(&fw, "wave 4 80 right ff0000\0", 23) == -EINVAL, "NUL accepted");
 	char longline[HAL_LINE_MAX + 8];
@@ -331,12 +303,12 @@ static void test_effect_errors(void)
 {
 	reset();
 	fake.fail_at = 1;
-	CHECK(effect_store("static 0 50 left ffffff") == -EIO, "status 1 is not -EIO");
+	CHECK(effect_store("neon 0 50 left ffffff") == -EIO, "status 1 is not -EIO");
 
 	reset();
 	fake.fail_at = 1;
 	fake.fail_with = ETIMEDOUT;
-	CHECK(effect_store("static 0 50 left ffffff") == -ETIMEDOUT, "call error lost");
+	CHECK(effect_store("neon 0 50 left ffffff") == -ETIMEDOUT, "call error lost");
 }
 
 static void test_effect_show(void)
@@ -353,7 +325,14 @@ static void test_effect_show(void)
 	CHECK(fake.count == 1 && fake.calls[0].method == HAL_GET_EFFECT, "one method 21 call");
 	check_invariants();
 
-	/* Values Helios cannot set (e.g. from Windows) still read back. */
+	/* Static reads back (it cannot be set), and so do unknown values. */
+	reset();
+	const u8 still[16] = { 0, 0, 0, 100, 0xff, 2, 0xff, 0, 0, 3 };
+
+	memcpy(fake.effect, still, sizeof(still));
+	hal_effect_show(&fw, buf);
+	CHECK(!strcmp(buf, "static 0 100 right ff0000\n"), "show gave \"%s\"", buf);
+
 	reset();
 	const u8 odd[16] = { 0, 7, 9, 100, 0xff, 0, 1, 2, 3, 0 };
 
@@ -366,84 +345,82 @@ static void test_effect_show(void)
 	CHECK(hal_effect_show(&fw, buf) == -EIO, "bad status not reported");
 }
 
-/* ------------------------------------------------------------- keyboard_zones */
+/* -------------------------------------------------------------------- logo */
 
-static void test_zones_bytes(void)
+static void test_logo_bytes(void)
 {
+	const u8 colour[8] = { 1, 0xff, 0x66, 0x00, 70, 1, 0, 0 };
+	const u8 power[16] = { 1, 0, 0, 0, 0, 0, 0, 0, 0, 2 };
+
 	reset();
-	CHECK(zones_store("60 ff0000 00ff00 0000ff ffffff\n") == 0, "valid zones rejected");
-	CHECK(fake.count == 5, "%zu calls, want 5", fake.count);
-
-	/* As the community driver does on this model: no direction or colour. */
-	const u8 effect[16] = { 0, 0, 60, 0, 0, 0, 0, 0, 3, 1 };
-
-	CHECK(fake.calls[0].method == HAL_SET_EFFECT, "first call is method 20");
-	check_bytes(&fake.calls[0], effect, 16, "static effect");
-
-	const u8 zone[4][8] = {
-		{ 1, 0xff, 0, 0 }, { 2, 0, 0xff, 0 }, { 4, 0, 0, 0xff }, { 8, 0xff, 0xff, 0xff },
-	};
-	for (int z = 0; z < 4; z++) {
-		CHECK(fake.calls[1 + z].method == HAL_SET_ZONE, "call %d is method 6", 2 + z);
-		check_bytes(&fake.calls[1 + z], zone[z], 8, "zone");
-		CHECK(fake.calls[1 + z].pauses_before == 1, "zone %d: %zu pauses before it",
-		      z + 1, fake.calls[1 + z].pauses_before);
-	}
-	CHECK(fake.calls[0].pauses_before == 0, "pause before the first call");
-	CHECK(fake.pending_pauses == 0, "pause after the last call");
+	CHECK(logo_store("1 70 ff6600\n") == 0, "valid logo line rejected");
+	CHECK(fake.count == 2, "%zu calls, want 2", fake.count);
+	CHECK(fake.calls[0].method == HAL_SET_LOGO, "first call is method 12");
+	check_bytes(&fake.calls[0], colour, 8, "logo colour");
+	CHECK(fake.calls[1].method == HAL_SET_EFFECT, "second call is method 20");
+	check_bytes(&fake.calls[1], power, 16, "logo power");
+	CHECK(fake.calls[0].pauses_before == 0 && fake.calls[1].pauses_before == 1 &&
+	      fake.pending_pauses == 0, "one pause, between the two calls");
 	check_invariants();
+
+	reset();
+	CHECK(logo_store("0 0 000000") == 0, "logo off rejected");
+	CHECK(fake.calls[0].in[5] == 0 && fake.calls[1].in[0] == 0, "logo off bytes");
 }
 
-static void test_zones_rejects(void)
+static void test_logo_ranges(void)
+{
+	char line[64];
+
+	for (int n = 0; n < 1000; n++) {
+		reset();
+		snprintf(line, sizeof(line), "1 %d 00ff00", n);
+		int ret = logo_store(line);
+
+		if (n <= 100)
+			CHECK(ret == 0 && fake.calls[0].in[4] == n, "logo brightness %d", n);
+		else
+			CHECK(ret == -EINVAL && fake.count == 0, "logo brightness %d accepted", n);
+		check_invariants();
+	}
+}
+
+static void test_logo_rejects(void)
 {
 	static const char *const bad[] = {
-		"", "60", "60 ff0000 00ff00 0000ff",
-		"60 ff0000 00ff00 0000ff ffffff 000000",
-		"101 ff0000 00ff00 0000ff ffffff",
-		"060 ff0000 00ff00 0000ff ffffff",
-		"60 ff0000 00ff00 0000ff fffff",
-		"60 ff0000 00ff00 0000ff #fffff",
-		"60 ff0000 00ff00  0000ff ffffff",
-		"wave ff0000 00ff00 0000ff ffffff",
+		"", "1", "1 100", "2 100 ff0000", "01 100 ff0000", "1 101 ff0000", "1 100 ff000",
+		"on 100 ff0000", "1 100 ff0000 x", "1  100 ff0000", "1 100 #ff0000",
 	};
 
 	for (size_t i = 0; i < ARRAY_SIZE(bad); i++) {
-		reset();
 		current = bad[i];
-		CHECK(zones_store(bad[i]) == -EINVAL, "accepted");
+		reset();
+		CHECK(logo_store(bad[i]) == -EINVAL, "accepted");
 		CHECK(fake.count == 0, "reached the firmware");
 	}
-	current = "zones rejects";
-}
+	current = "logo rejects";
 
-static void test_zones_stop_at_first_error(void)
-{
 	reset();
-	fake.fail_at = 3;
-	CHECK(zones_store("60 ff0000 00ff00 0000ff ffffff") == -EIO, "error not reported");
-	CHECK(fake.count == 3, "%zu calls after a failure, want 3", fake.count);
+	fake.fail_at = 1;
+	CHECK(logo_store("1 70 ff6600") == -EIO && fake.count == 1,
+	      "kept going after a failed colour write");
 }
 
-static void test_zones_show(void)
+static void test_logo_show(void)
 {
 	char buf[HAL_LINE_MAX];
-	const u8 zones[4][3] = { { 0xff, 0, 0 }, { 0, 0xff, 0 }, { 0, 0, 0xff }, { 0x12, 0x34, 0x56 } };
+	const u8 state[8] = { 0, 0x12, 0x34, 0x56, 80, 1, 0, 0 };
 
 	reset();
-	fake.effect[3] = 75;
-	memcpy(fake.zones, zones, sizeof(zones));
-	int n = hal_zones_show(&fw, buf);
-
-	CHECK(n > 0 && !strcmp(buf, "75 ff0000 00ff00 0000ff 123456\n"), "show gave \"%s\"", buf);
-	CHECK(fake.count == 5 && fake.calls[0].method == HAL_GET_EFFECT, "calls");
-	for (int z = 0; z < 4; z++)
-		CHECK(fake.calls[1 + z].method == HAL_GET_ZONE && fake.calls[1 + z].in[0] == 1u << z,
-		      "zone %d read", z);
+	memcpy(fake.logo, state, sizeof(state));
+	hal_logo_show(&fw, buf);
+	CHECK(!strcmp(buf, "1 80 123456\n"), "show gave \"%s\"", buf);
+	CHECK(fake.count == 1 && fake.calls[0].method == HAL_GET_LOGO, "read uses method 13");
 	check_invariants();
 
 	reset();
-	fake.fail_at = 4;
-	CHECK(hal_zones_show(&fw, buf) == -EIO, "bad zone status not reported");
+	fake.fail_at = 1;
+	CHECK(hal_logo_show(&fw, buf) == -EIO, "bad status not reported");
 }
 
 /* ------------------------------------------------------------- lighting_state */
@@ -456,15 +433,10 @@ static void test_state_show(void)
 	fake.kbst = 0x01;
 	fake.lbst = 0xf4;
 	fake.effect[9] = 3;
-	const u8 logo[16] = { 0, 1, 9, 100, 0xff, 2, 0xff, 0xff, 0xff, 0 };
-
-	memcpy(fake.logo_effect, logo, sizeof(logo));
 	int n = hal_state_show(&fw, buf);
 
-	CHECK(n > 0 && !strcmp(buf, "kbst=0x01 lbst=0xf4 kles=0x03 logo=breathing 9 100 right ffffff\n"),
-	      "show gave \"%s\"", buf);
-	CHECK(fake.count == 4, "%zu calls, want 4", fake.count);
-	CHECK(fake.calls[3].method == HAL_GET_EFFECT && fake.calls[3].in[0] == 2, "logo read");
+	CHECK(n > 0 && !strcmp(buf, "kbst=0x01 lbst=0xf4 kles=0x03\n"), "show gave \"%s\"", buf);
+	CHECK(fake.count == 3, "%zu calls, want 3", fake.count);
 	CHECK(fake.calls[0].method == HAL_GET_STATE && fake.calls[0].in[0] == 0x08, "KBST read");
 	CHECK(fake.calls[1].method == HAL_GET_STATE && fake.calls[1].in[0] == 0x10, "LBST read");
 	CHECK(fake.calls[2].method == HAL_GET_EFFECT, "KLES read");
@@ -474,142 +446,6 @@ static void test_state_show(void)
 	fake.fail_at = 2;
 	CHECK(hal_state_show(&fw, buf) == -EIO, "bad status not reported");
 	CHECK(fake.count == 2, "kept reading after a failure");
-}
-
-/* -------------------------------------------------------------------- logo */
-
-static void test_logo(void)
-{
-	static const char *const bad[] = {
-		"", "1", "1 100", "2 100 ff0000", "1 101 ff0000", "1 100 ff000", "on 100 ff0000",
-		"1 100 ff0000 x", "1  100 ff0000",
-	};
-	char buf[HAL_LINE_MAX];
-	const u8 colour[8] = { 1, 0xff, 0x66, 0x00, 70, 1, 0, 0 };
-	const u8 power[16] = { 1, 0, 0, 0, 0, 0, 0, 0, 0, 2 };
-
-	reset();
-	CHECK(hal_logo_store(&fw, "1 70 ff6600\n", 12) == 0, "valid logo line rejected");
-	CHECK(fake.count == 2, "%zu calls, want 2", fake.count);
-	CHECK(fake.calls[0].method == HAL_SET_LOGO, "first call is method 12");
-	check_bytes(&fake.calls[0], colour, 8, "logo colour");
-	CHECK(fake.calls[1].method == HAL_SET_EFFECT, "second call is method 20");
-	check_bytes(&fake.calls[1], power, 16, "logo power");
-	CHECK(fake.calls[1].pauses_before == 1, "no pause before the power call");
-	check_invariants();
-
-	reset();
-	CHECK(hal_logo_store(&fw, "0 0 000000", 10) == 0, "logo off rejected");
-	CHECK(fake.calls[0].in[5] == 0 && fake.calls[1].in[0] == 0, "logo off bytes");
-
-	for (size_t i = 0; i < ARRAY_SIZE(bad); i++) {
-		current = bad[i];
-		reset();
-		CHECK(hal_logo_store(&fw, bad[i], strlen(bad[i])) == -EINVAL, "accepted");
-		CHECK(fake.count == 0, "reached the firmware");
-	}
-	current = "logo";
-
-	reset();
-	fake.fail_at = 1;
-	CHECK(hal_logo_store(&fw, "1 70 ff6600", 11) == -EIO && fake.count == 1,
-	      "kept going after a failed colour write");
-
-	reset();
-	const u8 state[8] = { 0, 0x12, 0x34, 0x56, 80, 1, 0, 0 };
-
-	memcpy(fake.logo, state, sizeof(state));
-	hal_logo_show(&fw, buf);
-	CHECK(!strcmp(buf, "1 80 123456\n"), "show gave \"%s\"", buf);
-	CHECK(fake.calls[0].method == HAL_GET_LOGO, "read uses method 13");
-	check_invariants();
-}
-
-/* ------------------------------------------------------------- logo_effect */
-
-static void test_logo_effect(void)
-{
-	char buf[HAL_LINE_MAX];
-	const u8 want[16] = { 1, 4, 100, 0, 2, 0xff, 0, 0, 3, 2 };
-
-	reset();
-	CHECK(hal_logo_effect_store(&fw, "breathing 4 100 right ff0000", 28) == 0, "rejected");
-	CHECK(fake.count == 1 && fake.calls[0].method == HAL_SET_EFFECT, "one method 20 call");
-	check_bytes(&fake.calls[0], want, 16, "logo breathing");
-
-	reset();
-	CHECK(hal_logo_effect_store(&fw, "breathing 4 101 right ff0000", 28) == -EINVAL &&
-	      fake.count == 0, "bad logo line accepted");
-
-	/* keyboard_effect never targets the logo, and the reverse. */
-	reset();
-	hal_effect_store(&fw, "zoom 1 1 left 000001", 20);
-	CHECK(fake.calls[0].in[9] == 1, "keyboard_effect target %u", fake.calls[0].in[9]);
-
-	reset();
-	const u8 logo[16] = { 0, 0, 0, 0, 0xff, 0, 0, 0, 0, 0 };
-
-	memcpy(fake.logo_effect, logo, sizeof(logo));
-	hal_logo_effect_show(&fw, buf);
-	CHECK(!strcmp(buf, "static 0 0 unknown 000000\n"), "show gave \"%s\"", buf);
-	CHECK(fake.calls[0].in[0] == 2, "logo read target %u", fake.calls[0].in[0]);
-	check_invariants();
-}
-
-/* ------------------------------------------------ keyboard_state, logo_state */
-
-static void test_state_store(void)
-{
-	static const char *const bad[] = {
-		"", "\n", "16", "255", "01", "00", "-1", "+1", "on", "1 1", " 1", "1 ", "0xf1", "f1",
-	};
-	static const char *const logo_bad[] = { "2", "15" };
-	const u8 kb_on[16] = { 0x08, 0, 0, 0, 0, 1 };
-	const u8 logo_on[16] = { 0x10, 0, 0, 0, 0, 0, 0xf1, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-				 0xff };
-	const u8 logo_off[16] = { 0x10, 0, 0, 0, 0, 0, 0xf0, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-				  0xff };
-
-	reset();
-	CHECK(hal_keyboard_state_store(&fw, "1\n", 2) == 0, "keyboard 1 rejected");
-	CHECK(fake.count == 1 && fake.calls[0].method == HAL_SET_STATE, "one method 2 call");
-	check_bytes(&fake.calls[0], kb_on, 16, "KBST 1");
-	reset();
-	CHECK(hal_keyboard_state_store(&fw, "0", 1) == 0 && fake.calls[0].in[5] == 0, "keyboard 0");
-	for (int m = 0; m <= 15; m++) {
-		char line[16];
-
-		reset();
-		snprintf(line, sizeof(line), "%d", m);
-		CHECK(hal_keyboard_state_store(&fw, line, strlen(line)) == 0 &&
-		      fake.calls[0].in[5] == m, "keyboard %d", m);
-	}
-	for (size_t i = 0; i < ARRAY_SIZE(logo_bad); i++) {
-		reset();
-		CHECK(hal_logo_state_store(&fw, logo_bad[i], strlen(logo_bad[i])) == -EINVAL &&
-		      fake.count == 0, "logo %s accepted", logo_bad[i]);
-	}
-
-	reset();
-	CHECK(hal_logo_state_store(&fw, "1", 1) == 0, "logo 1 rejected");
-	check_bytes(&fake.calls[0], logo_on, 16, "LBST on");
-	reset();
-	CHECK(hal_logo_state_store(&fw, "0\n", 2) == 0, "logo 0 rejected");
-	check_bytes(&fake.calls[0], logo_off, 16, "LBST off");
-	check_invariants();
-
-	for (size_t i = 0; i < ARRAY_SIZE(bad); i++) {
-		current = bad[i];
-		reset();
-		CHECK(hal_keyboard_state_store(&fw, bad[i], strlen(bad[i])) == -EINVAL, "keyboard accepted");
-		CHECK(hal_logo_state_store(&fw, bad[i], strlen(bad[i])) == -EINVAL, "logo accepted");
-		CHECK(fake.count == 0, "reached the firmware");
-	}
-	current = "state store";
-
-	reset();
-	fake.fail_at = 1;
-	CHECK(hal_logo_state_store(&fw, "1", 1) == -EIO, "bad status not reported");
 }
 
 /* --------------------------------------------------------------- fuzzing */
@@ -638,25 +474,10 @@ static void test_fuzz(void)
 			len += (size_t)snprintf(line + len, sizeof(line) - len, w ? " %s" : "%s", word);
 		}
 		reset();
-		switch (round % 5) {
-		case 0:
+		if (round & 1)
 			hal_effect_store(&fw, line, len);
-			break;
-		case 1:
-			hal_zones_store(&fw, line, len);
-			break;
-		case 2:
-			hal_keyboard_state_store(&fw, line, len);
-			break;
-		case 3:
-			if (round & 8)
-				hal_logo_effect_store(&fw, line, len);
-			else
-				hal_logo_store(&fw, line, len);
-			break;
-		default:
-			hal_logo_state_store(&fw, line, len);
-		}
+		else
+			hal_logo_store(&fw, line, len);
 		check_invariants();
 		if (failures)
 			return;
@@ -675,14 +496,11 @@ int main(void)
 		{ "effect rejects", test_effect_rejects },
 		{ "effect errors", test_effect_errors },
 		{ "effect show", test_effect_show },
-		{ "zones bytes", test_zones_bytes },
-		{ "zones rejects", test_zones_rejects },
-		{ "zones stop at first error", test_zones_stop_at_first_error },
-		{ "zones show", test_zones_show },
+		{ "logo bytes", test_logo_bytes },
+		{ "logo ranges", test_logo_ranges },
+		{ "logo rejects", test_logo_rejects },
+		{ "logo show", test_logo_show },
 		{ "state show", test_state_show },
-		{ "state store", test_state_store },
-		{ "logo effect", test_logo_effect },
-		{ "logo", test_logo },
 		{ "fuzz", test_fuzz },
 	};
 	size_t n = ARRAY_SIZE(tests);

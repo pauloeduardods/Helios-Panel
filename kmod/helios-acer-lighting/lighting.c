@@ -1,31 +1,35 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 /*
- * Keyboard lighting protocol: parses the attribute lines, builds the exact
- * firmware buffers and formats the read-back. No kernel dependencies; see
- * lighting.h.
+ * Keyboard and logo lighting protocol: parses the attribute lines, builds
+ * the exact firmware buffers and formats the read-back. No kernel
+ * dependencies; see lighting.h.
  */
 #include "lighting.h"
 
-/* Method 20 byte 9 selects the target. Only the keyboard is ever sent. */
+/* Method 20 byte 9 selects the target. */
 #define TARGET_KEYBOARD 1
-/* The lid logo (LB) target, written only through logo_effect. */
 #define TARGET_LOGO 2
-/* KBST looks like a mask of lit zones, one bit per zone (as in method 6). */
-#define KBST_MAX 0x0f
 /*
- * Method 20 byte 8, stored by the firmware as KLES. The ACPI code only
- * stores it, but the static effect stays dark unless it is 3, the value the
- * community driver tested on this model sends (docs/LIGHTING.md).
+ * Method 20 byte 8, stored by the firmware as KLES. The ACPI code gives it
+ * no meaning; 3 is what the community drivers for this model send.
  */
 #define STORED_STATE 3
 /* Method 4 selectors: the keyboard state (KBST) and the logo state (LBST). */
 #define STATE_KEYBOARD 0x08
 #define STATE_LOGO 0x10
+/* Method 12 and 13 accept only this selector. */
+#define LOGO_SELECTOR 1
 
-/* Indexed by the firmware's effect number. */
+/*
+ * Indexed by the firmware's effect number. Effect 0 (static) is shown when
+ * read back but not accepted: on this machine it leaves the keyboard dark
+ * (docs/LIGHTING.md).
+ */
 static const char *const effects[] = {
 	"static", "breathing", "neon", "wave", "shifting", "zoom",
 };
+
+#define EFFECT_STATIC 0
 
 /* Indexed by the firmware's direction number; 0 is not a direction. */
 static const char *const directions[] = {
@@ -224,10 +228,49 @@ static int set(const struct hal_fw *fw, enum hal_method method, const u8 *in, si
 	return out[0] == 0 ? 0 : -EIO;
 }
 
-static int set_target_effect(const struct hal_fw *fw, u8 target, u8 effect, u8 speed,
-			     u8 brightness, u8 direction, struct rgb c)
+/* Calls a get method with @in and checks its status byte. */
+static int get(const struct hal_fw *fw, enum hal_method method, const u8 *in, size_t in_len,
+	       u8 *out, size_t out_len)
+{
+	int ret = fw->call(fw->ctx, method, in, in_len, out, out_len);
+
+	if (ret)
+		return ret;
+	return out[0] == 0 ? 0 : -EIO;
+}
+
+static int get_effect(const struct hal_fw *fw, u8 *out)
+{
+	const u8 in[HAL_GET_EFFECT_IN] = { TARGET_KEYBOARD, 0, 0, 0 };
+
+	return get(fw, HAL_GET_EFFECT, in, sizeof(in), out, HAL_GET_EFFECT_OUT);
+}
+
+/* Method 4 only reads; @selector picks which register. */
+static int get_state(const struct hal_fw *fw, u8 selector, u8 *out)
+{
+	const u8 in[HAL_GET_STATE_IN] = { selector, 0, 0, 0, 0, 0, 0, 0 };
+
+	return get(fw, HAL_GET_STATE, in, sizeof(in), out, HAL_GET_STATE_OUT);
+}
+
+/* -------------------------------------------------------- keyboard_effect */
+
+int hal_effect_store(const struct hal_fw *fw, const char *buf, size_t len)
 {
 	u8 in[HAL_SET_EFFECT_IN] = { 0 };
+	u8 effect, speed, brightness, direction;
+	struct tokens t;
+	struct rgb c;
+
+	if (split(buf, len, &t, 5) ||
+	    parse_name(t.word[0], t.len[0], effects, ARRAY_SIZE(effects), &effect) ||
+	    effect == EFFECT_STATIC ||
+	    parse_uint(t.word[1], t.len[1], HAL_MAX_SPEED, &speed) ||
+	    parse_uint(t.word[2], t.len[2], HAL_MAX_BRIGHTNESS, &brightness) ||
+	    parse_name(t.word[3], t.len[3], directions, ARRAY_SIZE(directions), &direction) ||
+	    parse_rgb(t.word[4], t.len[4], &c))
+		return -EINVAL;
 
 	in[0] = effect;
 	in[1] = speed;
@@ -238,247 +281,35 @@ static int set_target_effect(const struct hal_fw *fw, u8 target, u8 effect, u8 s
 	in[6] = c.g;
 	in[7] = c.b;
 	in[8] = STORED_STATE;
-	in[9] = target;
+	in[9] = TARGET_KEYBOARD;
 	return set(fw, HAL_SET_EFFECT, in, sizeof(in));
-}
-
-static int set_effect(const struct hal_fw *fw, u8 effect, u8 speed, u8 brightness,
-		      u8 direction, struct rgb c)
-{
-	return set_target_effect(fw, TARGET_KEYBOARD, effect, speed, brightness, direction, c);
-}
-
-static int get_target_effect(const struct hal_fw *fw, u8 target, u8 *out)
-{
-	u8 in[HAL_GET_EFFECT_IN] = { target, 0, 0, 0 };
-	int ret = fw->call(fw->ctx, HAL_GET_EFFECT, in, sizeof(in), out, HAL_GET_EFFECT_OUT);
-
-	if (ret)
-		return ret;
-	return out[0] == 0 ? 0 : -EIO;
-}
-
-static int get_effect(const struct hal_fw *fw, u8 *out)
-{
-	return get_target_effect(fw, TARGET_KEYBOARD, out);
-}
-
-/* Method 4 only reads; @selector picks which register. */
-static int get_state(const struct hal_fw *fw, u8 selector, u8 *out)
-{
-	u8 in[HAL_GET_STATE_IN] = { selector, 0, 0, 0, 0, 0, 0, 0 };
-	int ret = fw->call(fw->ctx, HAL_GET_STATE, in, sizeof(in), out, HAL_GET_STATE_OUT);
-
-	if (ret)
-		return ret;
-	return out[0] == 0 ? 0 : -EIO;
-}
-
-/* ------------------------------------------------------------- attributes */
-
-static int effect_store(const struct hal_fw *fw, u8 target, const char *buf, size_t len)
-{
-	struct tokens t;
-	u8 effect, speed, brightness, direction;
-	struct rgb c;
-
-	if (split(buf, len, &t, 5) ||
-	    parse_name(t.word[0], t.len[0], effects, ARRAY_SIZE(effects), &effect) ||
-	    parse_uint(t.word[1], t.len[1], HAL_MAX_SPEED, &speed) ||
-	    parse_uint(t.word[2], t.len[2], HAL_MAX_BRIGHTNESS, &brightness) ||
-	    parse_name(t.word[3], t.len[3], directions, ARRAY_SIZE(directions), &direction) ||
-	    parse_rgb(t.word[4], t.len[4], &c))
-		return -EINVAL;
-
-	return set_target_effect(fw, target, effect, speed, brightness, direction, c);
-}
-
-int hal_effect_store(const struct hal_fw *fw, const char *buf, size_t len)
-{
-	return effect_store(fw, TARGET_KEYBOARD, buf, len);
-}
-
-int hal_logo_effect_store(const struct hal_fw *fw, const char *buf, size_t len)
-{
-	return effect_store(fw, TARGET_LOGO, buf, len);
-}
-
-/* "<effect> <speed> <brightness> <direction> <rrggbb>" from a method 21 reply. */
-static void put_effect(struct line *l, const u8 *out)
-{
-	put_name(l, effects, ARRAY_SIZE(effects), out[1]);
-	put_str(l, " ");
-	put_uint(l, out[2]);
-	put_str(l, " ");
-	put_uint(l, out[3]);
-	put_str(l, " ");
-	put_name(l, directions, ARRAY_SIZE(directions), out[5]);
-	put_str(l, " ");
-	put_rgb(l, out + 6);
-}
-
-static int effect_show(const struct hal_fw *fw, u8 target, char *buf)
-{
-	u8 out[HAL_GET_EFFECT_OUT] = { 0 };
-	struct line l = { buf, 0 };
-	int ret = get_target_effect(fw, target, out);
-
-	if (ret)
-		return ret;
-	put_effect(&l, out);
-	return finish(&l);
 }
 
 int hal_effect_show(const struct hal_fw *fw, char *buf)
 {
-	return effect_show(fw, TARGET_KEYBOARD, buf);
-}
-
-int hal_logo_effect_show(const struct hal_fw *fw, char *buf)
-{
-	return effect_show(fw, TARGET_LOGO, buf);
-}
-
-int hal_zones_store(const struct hal_fw *fw, const char *buf, size_t len)
-{
-	struct tokens t;
-	struct rgb c[HAL_ZONES];
-	const struct rgb black = { 0, 0, 0 };
-	u8 brightness;
-	size_t i;
-	int ret;
-
-	if (split(buf, len, &t, 1 + HAL_ZONES) ||
-	    parse_uint(t.word[0], t.len[0], HAL_MAX_BRIGHTNESS, &brightness))
-		return -EINVAL;
-	for (i = 0; i < HAL_ZONES; i++)
-		if (parse_rgb(t.word[1 + i], t.len[1 + i], &c[i]))
-			return -EINVAL;
-
-	/*
-	 * Static effect at this brightness, then each zone's colour. The
-	 * static call carries no direction and no colour of its own.
-	 */
-	ret = set_effect(fw, 0, 0, brightness, 0, black);
-	if (ret)
-		return ret;
-
-	for (i = 0; i < HAL_ZONES; i++) {
-		u8 in[HAL_SET_ZONE_IN] = { 0 };
-
-		fw->pause(fw->ctx);
-
-		in[0] = (u8)(1u << i);
-		in[1] = c[i].r;
-		in[2] = c[i].g;
-		in[3] = c[i].b;
-		ret = set(fw, HAL_SET_ZONE, in, sizeof(in));
-		if (ret)
-			return ret;
-	}
-	return 0;
-}
-
-int hal_zones_show(const struct hal_fw *fw, char *buf)
-{
-	u8 effect[HAL_GET_EFFECT_OUT] = { 0 };
+	u8 out[HAL_GET_EFFECT_OUT] = { 0 };
 	struct line l = { buf, 0 };
-	size_t i;
-	int ret = get_effect(fw, effect);
+	int ret = get_effect(fw, out);
 
 	if (ret)
 		return ret;
-	put_uint(&l, effect[3]);
-	for (i = 0; i < HAL_ZONES; i++) {
-		u8 in[HAL_GET_ZONE_IN] = { (u8)(1u << i), 0, 0, 0 };
-		u8 out[HAL_GET_ZONE_OUT] = { 0 };
-
-		ret = fw->call(fw->ctx, HAL_GET_ZONE, in, sizeof(in), out, sizeof(out));
-		if (ret)
-			return ret;
-		if (out[0] != 0)
-			return -EIO;
-		put_str(&l, " ");
-		put_rgb(&l, out + 1);
-	}
+	put_name(&l, effects, ARRAY_SIZE(effects), out[1]);
+	put_str(&l, " ");
+	put_uint(&l, out[2]);
+	put_str(&l, " ");
+	put_uint(&l, out[3]);
+	put_str(&l, " ");
+	put_name(&l, directions, ARRAY_SIZE(directions), out[5]);
+	put_str(&l, " ");
+	put_rgb(&l, out + 6);
 	return finish(&l);
 }
 
-int hal_state_show(const struct hal_fw *fw, char *buf)
-{
-	u8 keyboard[HAL_GET_STATE_OUT] = { 0 };
-	u8 logo[HAL_GET_STATE_OUT] = { 0 };
-	u8 effect[HAL_GET_EFFECT_OUT] = { 0 };
-	u8 logo_effect[HAL_GET_EFFECT_OUT] = { 0 };
-	struct line l = { buf, 0 };
-	int ret;
-
-	ret = get_state(fw, STATE_KEYBOARD, keyboard);
-	if (!ret)
-		ret = get_state(fw, STATE_LOGO, logo);
-	if (!ret)
-		ret = get_effect(fw, effect);
-	if (!ret)
-		ret = get_target_effect(fw, TARGET_LOGO, logo_effect);
-	if (ret)
-		return ret;
-	put_str(&l, "kbst=");
-	put_hex(&l, keyboard[5]);
-	put_str(&l, " lbst=");
-	put_hex(&l, logo[6]);
-	put_str(&l, " kles=");
-	put_hex(&l, effect[9]);
-	put_str(&l, " logo=");
-	put_effect(&l, logo_effect);
-	return finish(&l);
-}
-
-/* Method 2 with the keyboard or logo selector; returns a status byte. */
-static int set_state(const struct hal_fw *fw, const u8 *in)
-{
-	return set(fw, HAL_SET_STATE, in, HAL_SET_STATE_IN);
-}
-
-static int parse_one(const char *buf, size_t len, unsigned int max, u8 *value)
-{
-	struct tokens t;
-
-	if (split(buf, len, &t, 1) || parse_uint(t.word[0], t.len[0], max, value))
-		return -EINVAL;
-	return 0;
-}
-
-int hal_keyboard_state_store(const struct hal_fw *fw, const char *buf, size_t len)
-{
-	u8 in[HAL_SET_STATE_IN] = { 0 };
-	u8 mask;
-
-	if (parse_one(buf, len, KBST_MAX, &mask))
-		return -EINVAL;
-	in[0] = STATE_KEYBOARD;
-	in[5] = mask;
-	return set_state(fw, in);
-}
-
-int hal_logo_state_store(const struct hal_fw *fw, const char *buf, size_t len)
-{
-	u8 in[HAL_SET_STATE_IN] = { 0 };
-	size_t i;
-	u8 bit;
-
-	if (parse_one(buf, len, 1, &bit))
-		return -EINVAL;
-	/* The firmware only accepts 0xF0/0xF1 followed by seven 0xFF bytes. */
-	in[0] = STATE_LOGO;
-	in[6] = (u8)(0xf0 | bit);
-	for (i = 7; i <= 13; i++)
-		in[i] = 0xff;
-	return set_state(fw, in);
-}
+/* ------------------------------------------------------------------- logo */
 
 int hal_logo_store(const struct hal_fw *fw, const char *buf, size_t len)
 {
-	u8 in[HAL_SET_LOGO_IN] = { 0 };
+	u8 colour[HAL_SET_LOGO_IN] = { 0 };
 	u8 power[HAL_SET_EFFECT_IN] = { 0 };
 	struct tokens t;
 	u8 on, brightness;
@@ -491,13 +322,13 @@ int hal_logo_store(const struct hal_fw *fw, const char *buf, size_t len)
 	    parse_rgb(t.word[2], t.len[2], &c))
 		return -EINVAL;
 
-	in[0] = 1;	/* the only selector the firmware accepts */
-	in[1] = c.r;
-	in[2] = c.g;
-	in[3] = c.b;
-	in[4] = brightness;
-	in[5] = on;
-	ret = set(fw, HAL_SET_LOGO, in, sizeof(in));
+	colour[0] = LOGO_SELECTOR;
+	colour[1] = c.r;
+	colour[2] = c.g;
+	colour[3] = c.b;
+	colour[4] = brightness;
+	colour[5] = on;
+	ret = set(fw, HAL_SET_LOGO, colour, sizeof(colour));
 	if (ret)
 		return ret;
 
@@ -509,19 +340,43 @@ int hal_logo_store(const struct hal_fw *fw, const char *buf, size_t len)
 
 int hal_logo_show(const struct hal_fw *fw, char *buf)
 {
-	u8 in[HAL_GET_LOGO_IN] = { 1, 0, 0, 0 };
+	const u8 in[HAL_GET_LOGO_IN] = { LOGO_SELECTOR, 0, 0, 0 };
 	u8 out[HAL_GET_LOGO_OUT] = { 0 };
 	struct line l = { buf, 0 };
-	int ret = fw->call(fw->ctx, HAL_GET_LOGO, in, sizeof(in), out, sizeof(out));
+	int ret = get(fw, HAL_GET_LOGO, in, sizeof(in), out, sizeof(out));
 
 	if (ret)
 		return ret;
-	if (out[0] != 0)
-		return -EIO;
 	put_uint(&l, out[5]);
 	put_str(&l, " ");
 	put_uint(&l, out[4]);
 	put_str(&l, " ");
 	put_rgb(&l, out + 1);
+	return finish(&l);
+}
+
+/* --------------------------------------------------------- lighting_state */
+
+int hal_state_show(const struct hal_fw *fw, char *buf)
+{
+	u8 keyboard[HAL_GET_STATE_OUT] = { 0 };
+	u8 logo[HAL_GET_STATE_OUT] = { 0 };
+	u8 effect[HAL_GET_EFFECT_OUT] = { 0 };
+	struct line l = { buf, 0 };
+	int ret;
+
+	ret = get_state(fw, STATE_KEYBOARD, keyboard);
+	if (!ret)
+		ret = get_state(fw, STATE_LOGO, logo);
+	if (!ret)
+		ret = get_effect(fw, effect);
+	if (ret)
+		return ret;
+	put_str(&l, "kbst=");
+	put_hex(&l, keyboard[5]);
+	put_str(&l, " lbst=");
+	put_hex(&l, logo[6]);
+	put_str(&l, " kles=");
+	put_hex(&l, effect[9]);
 	return finish(&l);
 }

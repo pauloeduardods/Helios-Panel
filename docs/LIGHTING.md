@@ -1,11 +1,13 @@
 # Keyboard and logo lighting: research and plan
 
 > **Status: plan approved on 2026-10-14** (see [the decisions](#decisions-for-approval)).
-> Step 1, the kernel module, is implemented in
-> [`kmod/helios-acer-lighting/`](../kmod/helios-acer-lighting/) and has not
-> run on the hardware yet; the heliosd interface and the extension section
-> come next. Every protocol fact below comes from reading files: the
-> firmware's ACPI tables, and the source of two community drivers.
+> Step 1, the kernel module in
+> [`kmod/helios-acer-lighting/`](../kmod/helios-acer-lighting/), is done and
+> tested on the PHN16-72 (module 0.2.0): the five animated keyboard effects
+> and the lid logo work. The **static** keyboard effect (one fixed colour,
+> or four zone colours) leaves the keyboard dark on this machine and is
+> left out until it is understood ([results](#hardware-test-results)). The
+> heliosd interface and the extension section come next.
 
 ## Summary
 
@@ -157,13 +159,14 @@ Until then, logo support stays out of the D-Bus API.
 
 ### The module
 
-- About 500 lines in `kmod/helios-acer-lighting/`, licensed
+- About 600 lines in `kmod/helios-acer-lighting/`, licensed
   **GPL-2.0-or-later** (kernel modules must be GPL-2-compatible, and this is
   compatible with the project's GPL-3.0-or-later). It has two parts:
   `lighting.c`, the protocol (parsing, the exact firmware buffers,
   formatting the read-back) with no kernel dependencies, and `driver.c`, the
   WMI driver that connects it to the firmware. The protocol part only knows
-  the numbers of methods 6, 7, 20 and 21, and the driver refuses any other.
+  the numbers of methods 4, 12, 13, 20 and 21, and the driver refuses any
+  other.
 - It binds only on the WMI GUID above **and** a DMI allow-list (to start,
   only "Predator PHN16-72"). On any other machine it does not load.
 - It exposes a tiny sysfs interface on the WMI device. Each write is one
@@ -173,26 +176,28 @@ Until then, logo support stays out of the D-Bus API.
   | Attribute | Write | Firmware calls |
   |---|---|---|
   | `keyboard_effect` | `<effect> <speed> <brightness> <direction> <rrggbb>`, e.g. `breathing 4 80 right ff0000` | method 20, target 1 |
-  | `keyboard_zones` | `<brightness> <rrggbb> <rrggbb> <rrggbb> <rrggbb>` | method 20 (static, with no direction or colour) + method 6 for zones 1 to 4 |
+  | `logo` | `<on> <brightness> <rrggbb>`, e.g. `1 100 ff0000` | method 12, then method 20 with target 2 carrying only the power |
+  | `lighting_state` | read only: `kbst=0xNN lbst=0xNN kles=0xNN` | methods 4 and 21; diagnostics for the static effect |
 
-  - `effect`: `static`, `breathing`, `neon`, `wave`, `shifting` or `zoom`.
-  - `speed`: 0 to 9. `brightness`: 0 to 100. Plain decimal, no sign, no
-    leading zeros.
+  - `effect`: `breathing`, `neon`, `wave`, `shifting` or `zoom`. `static`
+    reads back but is not accepted.
+  - `speed`: 0 to 9. `brightness`: 0 to 100. `on`: 0 or 1. Plain decimal,
+    no sign, no leading zeros.
   - `direction`: `left` (firmware value 1, right to left) or `right` (2,
     left to right). It is always sent, even for effects that ignore it.
   - Colours: exactly six hex digits, no `#`.
   - Words are separated by single spaces, and the line may end with one
     newline. Anything else is rejected.
 
-  Reading the same attributes returns the current state in the same format
-  (methods 21 and 7). A value Helios cannot set, such as an effect chosen
-  under Windows, reads back as `unknown`. Effects 6 and 7, and the `LB`
-  target, are not accepted until confirmed.
-- Operations are serialized by a mutex, and a write stops at the first
-  firmware error (`-EIO`).
-- The files are root-only (0600 root:root). heliosd's sandbox gets
-  `ReadWritePaths` for exactly these two attribute files, the same pattern as
-  the platform profile.
+  Reading `keyboard_effect` and `logo` returns the current state in the
+  same format (methods 21 and 13). A value Helios cannot set, such as an
+  effect chosen under Windows, reads back as `unknown`.
+- Operations are serialized by a mutex. The logo's two calls are 100 ms
+  apart, since the EC applies a write some time after it lands, and a
+  write stops at the first firmware error (`-EIO`).
+- The files are root-only (0600 root:root, `lighting_state` 0400). heliosd's
+  sandbox gets `ReadWritePaths` for exactly the two writable files, the
+  same pattern as the platform profile.
 - Nothing is sent to the firmware when the module loads; only reading or
   writing an attribute calls it.
 - **Secure Boot is on**, so the module must be signed. With DKMS that means
@@ -271,10 +276,11 @@ module's sysfs files exist.
 
 | Member | Type | Meaning |
 |---|---|---|
-| `Capabilities` | `a{sv}` | `targets` `as` (`["keyboard"]`), `zones` `u` (4), `effects` `as`, `speed` `(uu)` (0, 9), `brightness` `(uu)` (0, 100), `directions` `as` |
-| `Keyboard` | `a{sv}` | current state, read back from the module: `effect`, `speed`, `brightness`, `direction`, `color`, `zones` |
+| `Capabilities` | `a{sv}` | `effects` `as`, `speed` `(uu)` (0, 9), `brightness` `(uu)` (0, 100), `directions` `as`, `logo` `b` |
+| `Keyboard` | `a{sv}` | current state, read back from the module: `effect`, `speed`, `brightness`, `direction`, `color` |
+| `Logo` | `a{sv}` | `on`, `brightness`, `color` |
 | `SetKeyboardEffect(s effect, u speed, u brightness, s direction, s color)` | method | one effect and colour for the whole keyboard (`color` is `#rrggbb`) |
-| `SetKeyboardZones(as colors, u brightness)` | method | 4 static zone colours |
+| `SetLogo(b on, u brightness, s color)` | method | the lid logo |
 
 The order of checks is the same as `SetProfile`: validate first (an invalid
 argument never reaches polkit), then polkit
@@ -290,11 +296,9 @@ after resume (logind `PrepareForSleep(false)`).
 
 ## Extension
 
-- **Menu**: a "Lighting" section with an on/off switch, a brightness slider,
-  a row of colour presets, and an effect submenu.
-- **Preferences**: a "Lighting" page with the effect, speed, direction, and
-  four colour buttons for the zones.
-- Both appear only when `Capabilities` lists a target, and they follow the
+- **Menu**: a "Lighting" section with the keyboard effect, a brightness
+  slider, colour presets, and a logo on/off switch with its colour.
+- Both appear only when `Capabilities` lists them, and they follow the
   same daemon-not-running rules as the rest of the panel.
 
 ## Test plan
@@ -302,7 +306,7 @@ after resume (logind `PrepareForSleep(false)`).
 | Layer | Tests |
 |---|---|
 | helios-core (pure) | builds and parses the module's attribute lines; every out-of-range value is rejected before a line is built; exhaustive checks over the full input ranges |
-| kernel module (done) | `make -C kmod/helios-acer-lighting test`, part of `npm test`: the protocol code built in userspace with AddressSanitizer and UBSan against a fake firmware that records every call. It checks the exact bytes for every effect, direction and zone; every number from 0 to 999 for speed and brightness; about 30 malformed lines that must never reach the firmware; errors stopping a write; the read-back format; and 200,000 random lines, after each of which every call made must use only methods 6, 7, 20 or 21, target byte 1, single-zone masks and zeroed logo bytes. CI also builds the module against Ubuntu's generic kernel headers with `W=1` and `-Werror`, and runs `checkpatch.pl --strict`. (KUnit was the original idea; it needs a kernel built for it, which CI cannot do cheaply, so the protocol code is kernel-independent instead.) |
+| kernel module (done) | `make -C kmod/helios-acer-lighting test`, part of `npm test`: the protocol code built in userspace with AddressSanitizer and UBSan against a fake firmware that records every call. It checks the exact bytes for every effect, direction and logo write; every number from 0 to 999 for speed and brightness; about 45 malformed lines that must never reach the firmware, `static` among them; errors stopping a write; the read-back formats; and 200,000 random lines, after each of which every call made must use only methods 4, 12, 13, 20 or 21 with their exact sizes and limits, never the static effect, and the logo target only for the logo's power. CI also builds the module against Ubuntu's generic kernel headers with `W=1` and `-Werror`, and runs `checkpatch.pl --strict`. (KUnit was the original idea; it needs a kernel built for it, which CI cannot do cheaply, so the protocol code is kernel-independent instead.) |
 | heliosd | private-bus integration tests with a fake sysfs tree for the module's files: valid calls write exactly the expected line; invalid ones never reach polkit; polkit denial writes nothing; the interface is absent without the module; state is restored at start |
 | extension | fake proxy: section hidden without capabilities; controls call the right method with the right arguments; error messages |
 | real hardware | the [protocol below](#hardware-test-protocol), run only with you present |
@@ -310,34 +314,26 @@ after resume (logind `PrepareForSleep(false)`).
 ### Hardware test protocol
 
 Run only with the owner present, one step at a time, stopping at the first
-surprise (a wrong zone, a flicker that does not settle, an error, anything
-in `journalctl -k`). The first two steps only read.
+surprise (a flicker that does not settle, an error, anything in
+`journalctl -k`). The first two steps only read.
 
 ```bash
 D=/sys/bus/wmi/devices/7A4DDFE7-5B5D-40B4-8595-4408E0CC7F56
 ```
 
-1. **Bound?** `ls -l $D/keyboard_effect $D/keyboard_zones` shows two root-only
-   files, and `heliosctl doctor` reports `lighting` as ok.
+1. **Bound?** `ls -l $D` shows `keyboard_effect` and `logo` root-only, and
+   `heliosctl doctor` reports `lighting` as ok.
 2. **Read the current state** and keep it, to restore at the end:
-   `sudo cat $D/keyboard_effect $D/keyboard_zones | tee ~/helios-lighting-before.txt`
-3. **One colour**: `echo 'static 0 100 right ff0000' | sudo tee $D/keyboard_effect`.
-   Expect the whole keyboard red, and the same line when read back.
-4. **Brightness**: the same with `30` instead of `100`. Expect it dimmer.
-5. **Zones**: `echo '100 ff0000 00ff00 0000ff ffffff' | sudo tee $D/keyboard_zones`.
-   Expect red, green, blue and white from left to right, and the same line
-   when read back.
-6. **Effects**, one at a time, each read back:
+   `sudo cat $D/keyboard_effect $D/logo | tee ~/helios-lighting-before.txt`
+3. **Effects**, one at a time, each read back:
    `breathing 4 80 right 00ffff`, `neon 4 80 right 000000`,
    `wave 4 80 left 000000`, `wave 4 80 right 000000`,
-   `shifting 4 80 right 000000`, `zoom 4 80 right 000000`.
-7. **Rejection**: `echo 'wave 10 80 right ff0000' | sudo tee $D/keyboard_effect`
+   `shifting 4 80 right 00ff00`, `zoom 4 80 right ff00ff`.
+4. **Logo**: `1 100 ff0000`, `1 100 00ff00`, `1 30 00ff00`, read back, then
+   `0 0 000000`.
+5. **Rejection**: `wave 10 80 right ff0000` and `static 0 100 right ff0000`
    must fail with "Invalid argument" and change nothing.
-8. **Restore** the two lines saved in step 2 (if they read `unknown`, pick
-   any static colour instead).
-
-The `LB` (logo) probe is not part of this protocol; it needs its own
-approval.
+6. **Restore** what step 2 saved.
 
 ### Hardware test results
 
@@ -414,7 +410,15 @@ nekro-sense drives the logo, validated on the PHN16-72, through method 12
 ASL writes to `LBLR`, `LBLG`, `LBLB`, `LBLT` and `LBLF` only (method 13
 reads them back); then method 20 with target 2 and byte 0 set to the power.
 Module 0.1.6 adds a `logo` attribute, `<on> <brightness> <rrggbb>`, that does
-the same (approved on 2026-10-15).
+the same (approved on 2026-10-15). **It works**: the logo lights in the
+colour and brightness written, and turns off.
+
+Module 0.2.0 keeps only what works: `keyboard_effect` (the five animated
+effects; `static` is rejected), `logo`, and the read-only
+`lighting_state`. The experiments (`keyboard_zones`, `keyboard_state`,
+`logo_state`, `logo_effect`, and with them methods 2, 6 and 7) are removed;
+they stay in the git history for the static investigation. `KBST` was put
+back to 0, its original value.
 
 ## Safety summary
 

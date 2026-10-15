@@ -156,14 +156,14 @@ pub const PHN16_72_SYSTEM: &[(&str, &str)] = &[
         "<policyconfig/>",
     ),
     ("/proc/sys/kernel/osrelease", "7.0.0-38-generic"),
-    ("/sys/module/helios_acer_lighting/version", "0.1.6"),
+    ("/sys/module/helios_acer_lighting/version", "0.2.0"),
     (
         "/sys/bus/wmi/devices/7A4DDFE7-5B5D-40B4-8595-4408E0CC7F56/keyboard_effect",
-        "static 0 100 right ffffff",
+        "wave 5 100 left 000000",
     ),
     (
-        "/sys/bus/wmi/devices/7A4DDFE7-5B5D-40B4-8595-4408E0CC7F56/keyboard_zones",
-        "100 ffffff ffffff ffffff ffffff",
+        "/sys/bus/wmi/devices/7A4DDFE7-5B5D-40B4-8595-4408E0CC7F56/logo",
+        "1 100 ff0000",
     ),
 ];
 
