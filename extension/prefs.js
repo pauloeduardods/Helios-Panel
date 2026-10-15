@@ -8,16 +8,15 @@ import Gtk from 'gi://Gtk';
 import {ExtensionPreferences} from 'resource:///org/gnome/Shell/Extensions/js/extensions/prefs.js';
 
 import {BUS_NAME, OBJECT_PATH} from './lib/client.js';
-import {
-    PANEL_ITEMS, moveItem, normalizeOrder, profileFromDbus, sensorsFromDbus,
-} from './lib/model.js';
+import {profileFromDbus, sensorsFromDbus} from './lib/model.js';
+import {LayoutPage} from './lib/prefs/layoutPage.js';
 
 export default class HeliosPanelPreferences extends ExtensionPreferences {
     fillPreferencesWindow(window) {
         const settings = this.getSettings();
         window.set_default_size(640, 720);
+        window.add(new LayoutPage(settings, window, this.path).page);
         window.add(this._panelPage(settings));
-        window.add(this._graphPage(settings));
         window.add(this._temperaturePage(settings));
         window.add(this._sensorPage(settings));
     }
@@ -27,21 +26,13 @@ export default class HeliosPanelPreferences extends ExtensionPreferences {
     _panelPage(settings) {
         const page = new Adw.PreferencesPage({title: 'Panel', icon_name: 'video-display-symbolic'});
 
-        const show = new Adw.PreferencesGroup({title: 'Shown in the top bar'});
-        show.add(switchRow(settings, 'show-cpu', 'CPU temperature'));
-        show.add(switchRow(settings, 'show-gpu', 'GPU temperature'));
+        const show = new Adw.PreferencesGroup({
+            title: 'Top bar',
+            description: 'What each segment shows, its template, icon and graph are on the Layout page.',
+        });
         show.add(switchRow(settings, 'hide-gpu-when-off', 'Hide the GPU when it is off',
             'Otherwise shows a dimmed "off"'));
-        show.add(switchRow(settings, 'show-cpu-usage', 'CPU usage'));
-        show.add(switchRow(settings, 'show-gpu-usage', 'GPU usage', 'Hidden while the GPU is asleep'));
-        show.add(switchRow(settings, 'show-fans', 'Fan speed'));
-        show.add(switchRow(settings, 'show-power', 'Power draw',
-            'Watts while on battery, a dimmed "AC" when plugged in'));
-        show.add(switchRow(settings, 'show-profile', 'Power profile'));
-        show.add(switchRow(settings, 'show-icons', 'Icons'));
-        show.add(switchRow(settings, 'show-unit', 'Show "°C"', 'When off, shows only "°"'));
         page.add(show);
-        page.add(orderGroup(settings));
 
         const profile = new Adw.PreferencesGroup({title: 'Profile'});
         profile.add(comboRow(settings, 'profile-names', 'Profile names', [
@@ -62,45 +53,6 @@ export default class HeliosPanelPreferences extends ExtensionPreferences {
         return page;
     }
 
-    _graphPage(settings) {
-        const page = new Adw.PreferencesPage({title: 'Graphs', icon_name: 'power-profile-balanced-symbolic'});
-
-        const items = new Adw.PreferencesGroup({
-            title: 'Graphs in the top bar',
-            description: 'A small graph of the last minutes next to a reading. ' +
-                'It redraws only when heliosd sends a new value.',
-        });
-        for (const item of PANEL_ITEMS.filter(i => i.series)) {
-            const row = new Adw.ExpanderRow({title: item.label, show_enable_switch: true});
-            row.enable_expansion = strvHas(settings, 'graph-items', item.id);
-            row.connect('notify::enable-expansion',
-                () => strvSet(settings, 'graph-items', item.id, row.enable_expansion));
-            const only = new Adw.SwitchRow({title: 'Graph only', subtitle: 'Hide the number'});
-            only.active = strvHas(settings, 'graph-only', item.id);
-            only.connect('notify::active', () => strvSet(settings, 'graph-only', item.id, only.active));
-            row.add_row(only);
-            items.add(row);
-        }
-        page.add(items);
-
-        const look = new Adw.PreferencesGroup({title: 'Look'});
-        look.add(intComboRow(settings, 'graph-window', 'Time span', [
-            [60, '1 minute'], [120, '2 minutes'], [300, '5 minutes'],
-        ]));
-        look.add(comboRow(settings, 'graph-width', 'Width', [
-            ['narrow', 'Narrow'], ['medium', 'Medium'], ['wide', 'Wide'],
-        ]));
-        look.add(comboRow(settings, 'graph-style', 'Style', [
-            ['line', 'Line'], ['area', 'Filled area'],
-        ]));
-        look.add(comboRow(settings, 'graph-color-mode', 'Color', [
-            ['follow', 'Temperature colors (normal, warm, hot)'], ['fixed', 'One fixed color'],
-        ]));
-        look.add(colorRow(settings, 'graph-color', 'Fixed color', 'Used when Color is "One fixed color"'));
-        page.add(look);
-        return page;
-    }
-
     _temperaturePage(settings) {
         const page = new Adw.PreferencesPage({title: 'Colors', icon_name: 'applications-graphics-symbolic'});
 
@@ -116,7 +68,7 @@ export default class HeliosPanelPreferences extends ExtensionPreferences {
 
         const colors = new Adw.PreferencesGroup({
             title: 'Colors',
-            description: 'Used by the numbers and, unless a fixed color is chosen, by the graphs.',
+            description: 'Used by the readings and, unless a segment picks a fixed color, by the graphs.',
         });
         colors.add(colorRow(settings, 'color-normal', 'Normal', 'Empty = theme color'));
         colors.add(colorRow(settings, 'color-warm', 'Warm', null));
@@ -184,68 +136,6 @@ function readDaemon() {
 }
 
 // ------------------------------------------------------------ row helpers
-
-/** The top-bar items with buttons to move them left or right. */
-function orderGroup(settings) {
-    const group = new Adw.PreferencesGroup({title: 'Order', description: 'Left to right in the top bar'});
-    const reset = new Gtk.Button({
-        icon_name: 'edit-undo-symbolic', tooltip_text: 'Restore the default order',
-        valign: Gtk.Align.CENTER, css_classes: ['flat'],
-    });
-    reset.connect('clicked', () => settings.reset('panel-order'));
-    group.set_header_suffix(reset);
-
-    let rows = [];
-    const rebuild = () => {
-        for (const row of rows)
-            group.remove(row);
-        const order = normalizeOrder(settings.get_strv('panel-order'));
-        rows = order.map((id, i) => {
-            const row = new Adw.ActionRow({title: PANEL_ITEMS.find(item => item.id === id).label});
-            for (const [icon, delta, tip] of [['go-up-symbolic', -1, 'Move left'], ['go-down-symbolic', 1, 'Move right']]) {
-                const button = new Gtk.Button({
-                    icon_name: icon, tooltip_text: tip, valign: Gtk.Align.CENTER, css_classes: ['flat'],
-                    sensitive: delta < 0 ? i > 0 : i < order.length - 1,
-                });
-                button.connect('clicked', () => settings.set_strv('panel-order', moveItem(order, id, delta)));
-                row.add_suffix(button);
-            }
-            group.add(row);
-            return row;
-        });
-    };
-    const id = settings.connect('changed::panel-order', rebuild);
-    group.connect('destroy', () => settings.disconnect(id));
-    rebuild();
-    return group;
-}
-
-function strvHas(settings, key, id) {
-    return settings.get_strv(key).includes(id);
-}
-
-function strvSet(settings, key, id, on) {
-    const list = settings.get_strv(key).filter(x => x !== id);
-    if (on)
-        list.push(id);
-    settings.set_strv(key, list);
-}
-
-/** options: [value, label][] for an integer key. */
-function intComboRow(settings, key, title, options) {
-    const row = new Adw.ComboRow({
-        title,
-        model: Gtk.StringList.new(options.map(([, label]) => label)),
-    });
-    const current = options.findIndex(([value]) => value === settings.get_int(key));
-    row.selected = current < 0 ? 0 : current;
-    row.connect('notify::selected', () => {
-        const option = options[row.selected];
-        if (option)
-            settings.set_int(key, option[0]);
-    });
-    return row;
-}
 
 function switchRow(settings, key, title, subtitle = null) {
     const row = new Adw.SwitchRow({title});

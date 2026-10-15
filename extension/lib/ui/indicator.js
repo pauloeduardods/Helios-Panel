@@ -15,6 +15,7 @@ import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
 import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 
 import {HeliosClient} from '../client.js';
+import {paintBars, paintPieces} from '../draw.js';
 import {
     loadLayout, readOptions, readStyle, renderLayout, segmentColor, segmentMarkup, serializeLayout,
     seriesLevelOf,
@@ -40,50 +41,18 @@ function makeSegment(iconPath = null) {
     return {box, icon, label, graph, iconName: null, spec: null};
 }
 
-/** Draws bars from barPieces on a DrawingArea; `rgbOf(level)` as in drawPieces. */
-function drawBars(area, bars, rgbOf) {
+/** Draws sparkline pieces on a DrawingArea (see paintPieces). */
+function drawPieces(area, pieces, rgbOf, options = {}) {
     const cr = area.get_context();
-    for (const {x, y, width, height, level} of bars) {
-        const [r, g, b] = rgbOf(level);
-        cr.setSourceRGBA(r, g, b, 1);
-        cr.rectangle(x, y, width, height);
-        cr.fill();
-    }
+    const [, height] = area.get_surface_size();
+    paintPieces(cr, height, pieces, rgbOf, options);
     cr.$dispose();
 }
 
-/**
- * Draws sparkline pieces on a DrawingArea. `rgbOf(level)` gives a piece's
- * color as [r, g, b] (0–1); `area` fills under the line.
- */
-function drawPieces(area, pieces, rgbOf, {fill = false, alpha = 1} = {}) {
+/** Draws bars from barPieces on a DrawingArea. */
+function drawBars(area, bars, rgbOf) {
     const cr = area.get_context();
-    const [, height] = area.get_surface_size();
-    cr.setLineWidth(1.5);
-    for (const {points, level} of pieces) {
-        const [r, g, b] = rgbOf(level);
-        const [[x0, y0], ...rest] = points;
-        if (rest.length === 0) {
-            cr.setSourceRGBA(r, g, b, alpha);
-            cr.rectangle(x0 - 1, y0 - 1, 2, 2); // a lone reading between gaps
-            cr.fill();
-            continue;
-        }
-        if (fill) {
-            cr.setSourceRGBA(r, g, b, alpha * 0.35);
-            cr.moveTo(x0, height);
-            for (const [x, y] of points)
-                cr.lineTo(x, y);
-            cr.lineTo(points[points.length - 1][0], height);
-            cr.closePath();
-            cr.fill();
-        }
-        cr.setSourceRGBA(r, g, b, alpha);
-        cr.moveTo(x0, y0);
-        for (const [x, y] of rest)
-            cr.lineTo(x, y);
-        cr.stroke();
-    }
+    paintBars(cr, bars, rgbOf);
     cr.$dispose();
 }
 
