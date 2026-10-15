@@ -230,8 +230,9 @@ function withLighting() {
     globalThis.FAKE_BUS.props[`${IFACE}.Lighting`] = {
         Effects: ['breathing', 'neon', 'wave', 'shifting', 'zoom'],
         Directions: ['left', 'right'],
+        LogoModes: ['static', 'breathing', 'cycle'],
         Keyboard: ['zoom', 4, 80, 'right', '#ff00ff'],
-        Logo: [true, 100, '#00ff00'],
+        Logo: [true, 100, '#00ff00', 'breathing'],
     };
 }
 
@@ -243,7 +244,8 @@ test('lighting comes from the Lighting proxy', async () => {
     const {lighting} = client.snapshot();
     assert.equal(lighting.available, true);
     assert.equal(lighting.keyboard.effect, 'zoom');
-    assert.deepEqual(lighting.logo, {on: true, brightness: 100, color: '#00ff00'});
+    assert.deepEqual(lighting.logo, {on: true, brightness: 100, color: '#00ff00', mode: 'breathing'});
+    assert.deepEqual(lighting.logoModes, ['static', 'breathing', 'cycle']);
 });
 
 test('without the module (or an older heliosd) lighting is unavailable, the rest works', async () => {
@@ -272,15 +274,15 @@ test('setKeyboardEffect and setLogo call heliosd with the exact signatures', asy
     globalThis.FAKE_BUS.appear();
     await tick();
     await client.setKeyboardEffect(['wave', 4, 80, 'left', '#ff0000']);
-    await client.setLogo([true, 70, '#00ff00']);
+    await client.setLogo([true, 70, '#00ff00', 'cycle']);
     const [kb, logo] = globalThis.FAKE_BUS.calls.filter(c => c.iface === `${IFACE}.Lighting`);
     assert.equal(kb.method, 'SetKeyboardEffect');
     assert.equal(kb.params.type, '(suuss)');
     assert.deepEqual(kb.params.value, ['wave', 4, 80, 'left', '#ff0000']);
     assert.ok(kb.timeout >= 60000, 'polkit may prompt');
     assert.equal(logo.method, 'SetLogo');
-    assert.equal(logo.params.type, '(bus)');
-    assert.deepEqual(logo.params.value, [true, 70, '#00ff00']);
+    assert.equal(logo.params.type, '(buss)');
+    assert.deepEqual(logo.params.value, [true, 70, '#00ff00', 'cycle']);
 });
 
 test('lighting errors carry the heliosd error name', async () => {
@@ -298,7 +300,7 @@ test('lighting errors carry the heliosd error name', async () => {
 test('lighting writes while heliosd is not running fail without a call', async () => {
     const {client} = start();
     globalThis.FAKE_BUS.vanish();
-    await assert.rejects(client.setLogo([true, 100, '#ffffff']), {name: 'NotRunning'});
+    await assert.rejects(client.setLogo([true, 100, '#ffffff', 'static']), {name: 'NotRunning'});
     await assert.rejects(client.setKeyboardEffect(['wave', 4, 80, 'left', '#ff0000']), {name: 'NotRunning'});
     assert.equal(globalThis.FAKE_BUS.calls.length, 0);
 });

@@ -33,7 +33,7 @@ pub const PROFILE_IFACE: &str = "io.github.pauloeduardods.Helios1.Profile";
 /// 2 added GpuPower, PowerSource and Battery to Sensors; 3 added CpuPower;
 /// 4 added CpuUsage, CpuFrequency, GpuUsage and Devices; 5 added the
 /// GetHistory method; 6 added the Lighting interface.
-pub const API_VERSION: u32 = 6;
+pub const API_VERSION: u32 = 7;
 
 /// Firmware profile switches are not instant; do not hammer the EC.
 const MIN_WRITE_GAP: Duration = Duration::from_millis(250);

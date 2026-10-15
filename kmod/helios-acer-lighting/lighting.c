@@ -17,7 +17,7 @@
 /* Method 4 selectors: the keyboard state (KBST) and the logo state (LBST). */
 #define STATE_KEYBOARD 0x08
 #define STATE_LOGO 0x10
-/* Method 12 and 13 accept only this selector. */
+/* Methods 10 to 13 accept only this selector. */
 #define LOGO_SELECTOR 1
 
 /*
@@ -36,6 +36,16 @@ static const char *const directions[] = {
 	NULL, "left", "right",
 };
 
+/*
+ * Logo modes, indexed by the value of register LBET. Tested on the
+ * PHN16-72: 3 pulses in the logo colour, 4 cycles through the colours,
+ * every other value from 0 to 9 leaves the logo lit in its colour. Helios
+ * sets only 0 for static.
+ */
+static const char *const logo_modes[] = {
+	"static", NULL, NULL, "breathing", "cycle",
+};
+
 struct rgb {
 	u8 r, g, b;
 };
@@ -49,11 +59,12 @@ struct tokens {
 };
 
 /*
- * Splits one line into words separated by single spaces. The line may end
- * with one newline. Anything else (empty words, tabs, a second line, NUL,
- * too many words) fails.
+ * Splits one line into @min to @max words separated by single spaces. The
+ * line may end with one newline. Anything else (empty words, tabs, a second
+ * line, NUL, too many words) fails.
  */
-static int split(const char *buf, size_t len, struct tokens *t, size_t want)
+static int split_range(const char *buf, size_t len, struct tokens *t, size_t min,
+		       size_t max)
 {
 	size_t i, start = 0;
 
@@ -69,14 +80,19 @@ static int split(const char *buf, size_t len, struct tokens *t, size_t want)
 				return -EINVAL;
 			continue;
 		}
-		if (i == start || t->count == want)
+		if (i == start || t->count == max)
 			return -EINVAL;
 		t->word[t->count] = buf + start;
 		t->len[t->count] = i - start;
 		t->count++;
 		start = i + 1;
 	}
-	return t->count == want ? 0 : -EINVAL;
+	return t->count >= min ? 0 : -EINVAL;
+}
+
+static int split(const char *buf, size_t len, struct tokens *t, size_t want)
+{
+	return split_range(buf, len, t, want, want);
 }
 
 static int word_is(const char *word, size_t len, const char *name)
@@ -311,15 +327,18 @@ int hal_logo_store(const struct hal_fw *fw, const char *buf, size_t len)
 {
 	u8 colour[HAL_SET_LOGO_IN] = { 0 };
 	u8 power[HAL_SET_EFFECT_IN] = { 0 };
+	u8 animation[HAL_SET_LOGO_MODE_IN] = { 0 };
+	u8 on, brightness, mode = 0;
 	struct tokens t;
-	u8 on, brightness;
 	struct rgb c;
 	int ret;
 
-	if (split(buf, len, &t, 3) ||
+	if (split_range(buf, len, &t, 3, 4) ||
 	    parse_uint(t.word[0], t.len[0], 1, &on) ||
 	    parse_uint(t.word[1], t.len[1], HAL_MAX_BRIGHTNESS, &brightness) ||
-	    parse_rgb(t.word[2], t.len[2], &c))
+	    parse_rgb(t.word[2], t.len[2], &c) ||
+	    (t.count == 4 &&
+	     parse_name(t.word[3], t.len[3], logo_modes, ARRAY_SIZE(logo_modes), &mode)))
 		return -EINVAL;
 
 	colour[0] = LOGO_SELECTOR;
@@ -335,16 +354,27 @@ int hal_logo_store(const struct hal_fw *fw, const char *buf, size_t len)
 	fw->pause(fw->ctx);
 	power[0] = on;
 	power[9] = TARGET_LOGO;
-	return set(fw, HAL_SET_EFFECT, power, sizeof(power));
+	ret = set(fw, HAL_SET_EFFECT, power, sizeof(power));
+	if (ret)
+		return ret;
+
+	fw->pause(fw->ctx);
+	animation[0] = LOGO_SELECTOR;
+	animation[2] = mode;
+	return set(fw, HAL_SET_LOGO_MODE, animation, sizeof(animation));
 }
 
 int hal_logo_show(const struct hal_fw *fw, char *buf)
 {
 	const u8 in[HAL_GET_LOGO_IN] = { LOGO_SELECTOR, 0, 0, 0 };
+	const u8 mode_in[HAL_GET_LOGO_MODE_IN] = { LOGO_SELECTOR, 0, 0, 0 };
 	u8 out[HAL_GET_LOGO_OUT] = { 0 };
+	u8 mode[HAL_GET_LOGO_MODE_OUT] = { 0 };
 	struct line l = { buf, 0 };
 	int ret = get(fw, HAL_GET_LOGO, in, sizeof(in), out, sizeof(out));
 
+	if (!ret)
+		ret = get(fw, HAL_GET_LOGO_MODE, mode_in, sizeof(mode_in), mode, sizeof(mode));
 	if (ret)
 		return ret;
 	put_uint(&l, out[5]);
@@ -352,6 +382,8 @@ int hal_logo_show(const struct hal_fw *fw, char *buf)
 	put_uint(&l, out[4]);
 	put_str(&l, " ");
 	put_rgb(&l, out + 1);
+	put_str(&l, " ");
+	put_name(&l, logo_modes, ARRAY_SIZE(logo_modes), mode[1]);
 	return finish(&l);
 }
 

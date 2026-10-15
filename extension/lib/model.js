@@ -599,18 +599,35 @@ export function effectLabel(id) {
     return EFFECT_LABELS[id] ?? 'Other';
 }
 
-/** The Lighting interface; `available` is false without the module or on an older heliosd. */
-export function lightingFromDbus({Effects, Directions, Keyboard, Logo} = {}) {
-    if (!Array.isArray(Keyboard) || !Array.isArray(Logo))
-        return {available: false, effects: [], directions: [], keyboard: null, logo: null};
+/** The logo modes heliosd can set (its LogoModes property says the same). */
+export const LOGO_MODES = Object.freeze(['static', 'breathing', 'cycle']);
+
+const LOGO_MODE_LABELS = Object.freeze({
+    static: 'Static',
+    breathing: 'Breathing',
+    cycle: 'Color cycle',
+});
+
+export function logoModeLabel(id) {
+    return LOGO_MODE_LABELS[id] ?? 'Other';
+}
+
+/**
+ * The Lighting interface; `available` is false without the module or on an
+ * older heliosd (whose logo has no mode).
+ */
+export function lightingFromDbus({Effects, Directions, LogoModes, Keyboard, Logo} = {}) {
+    if (!Array.isArray(Keyboard) || !Array.isArray(Logo) || Logo.length !== 4)
+        return {available: false, effects: [], directions: [], logoModes: [], keyboard: null, logo: null};
     const [effect, speed, brightness, direction, color] = Keyboard;
-    const [on, logoBrightness, logoColor] = Logo;
+    const [on, logoBrightness, logoColor, mode] = Logo;
     return {
         available: true,
         effects: Effects ?? [],
         directions: Directions ?? [],
+        logoModes: LogoModes ?? [],
         keyboard: {effect, speed, brightness, direction, color},
-        logo: {on, brightness: logoBrightness, color: logoColor},
+        logo: {on, brightness: logoBrightness, color: logoColor, mode},
     };
 }
 
@@ -645,17 +662,19 @@ export function keyboardRequest(current, change, effects = KEYBOARD_EFFECTS) {
 
 /**
  * The SetLogo arguments. Turning the logo on at brightness 0, or in black,
- * would show nothing, so those become full brightness and white.
+ * would show nothing, so those become full brightness and white. A mode
+ * Helios cannot set becomes static.
  */
 export function logoRequest(current, change) {
-    const next = {on: false, brightness: 100, color: '#ffffff', ...current, ...change};
+    const next = {on: false, brightness: 100, color: '#ffffff', mode: 'static', ...current, ...change};
     let brightness = clamp(next.brightness, 100);
     let color = /^#[0-9a-f]{6}$/i.test(next.color ?? '') ? next.color : '#ffffff';
     if (next.on && brightness === 0)
         brightness = 100;
     if (next.on && color === '#000000')
         color = '#ffffff';
-    return [next.on === true, brightness, color];
+    const mode = LOGO_MODES.includes(next.mode) ? next.mode : 'static';
+    return [next.on === true, brightness, color, mode];
 }
 
 export function lightingError(name, message) {

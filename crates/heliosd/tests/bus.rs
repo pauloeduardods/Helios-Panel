@@ -41,7 +41,7 @@ const KEYBOARD: &str = "sys/bus/wmi/devices/7A4DDFE7-5B5D-40B4-8595-4408E0CC7F56
 const LOGO: &str = "sys/bus/wmi/devices/7A4DDFE7-5B5D-40B4-8595-4408E0CC7F56/logo";
 
 type Keyboard = (String, u32, u32, String, String);
-type Logo = (bool, u32, String);
+type Logo = (bool, u32, String, String);
 
 type Battery = (String, String, f64, f64, f64, i32, i32);
 
@@ -182,7 +182,10 @@ impl Harness {
         std::os::unix::fs::symlink(root.join(CLASS_PROFILE), root.join(LEGACY_PROFILE)).unwrap();
 
         if setup.lighting {
-            for (path, value) in [(KEYBOARD, "wave 5 100 left 000000"), (LOGO, "0 0 000000")] {
+            for (path, value) in [
+                (KEYBOARD, "wave 5 100 left 000000"),
+                (LOGO, "0 0 000000 static"),
+            ] {
                 let file = root.join(path);
                 fs::create_dir_all(file.parent().unwrap()).unwrap();
                 fs::write(file, format!("{value}\n")).unwrap();
@@ -364,11 +367,11 @@ impl Harness {
         )
     }
 
-    async fn set_logo(&self, on: bool, brightness: u32, color: &str) -> String {
+    async fn set_logo(&self, on: bool, brightness: u32, color: &str, mode: &str) -> String {
         let proxy = self.proxy(LIGHTING).await;
         Self::outcome(
             proxy
-                .call_method("SetLogo", &(on, brightness, color))
+                .call_method("SetLogo", &(on, brightness, color, mode))
                 .await
                 .map(Arc::new),
         )
@@ -518,7 +521,7 @@ fn properties_reflect_the_sysfs_tree() {
             ]
         );
 
-        assert_eq!(h.get::<u32>(DAEMON, "ApiVersion").await, 6);
+        assert_eq!(h.get::<u32>(DAEMON, "ApiVersion").await, 7);
         assert_eq!(
             h.get::<String>(DAEMON, "Version").await,
             env!("CARGO_PKG_VERSION")
@@ -806,7 +809,7 @@ fn lighting_properties_reflect_the_module() {
         );
         assert_eq!(
             h.get::<Logo>(LIGHTING, "Logo").await,
-            (false, 0, "#000000".into())
+            (false, 0, "#000000".into(), "static".into())
         );
         assert_eq!(h.saved(), "", "nothing saved, nothing restored");
     });
@@ -844,16 +847,20 @@ fn set_keyboard_effect_writes_saves_and_publishes() {
             }]
         );
 
-        assert_eq!(h.set_logo(true, 70, "#00ff00").await, "ok");
-        assert_eq!(h.read(LOGO), "1 70 00ff00");
+        assert_eq!(h.set_logo(true, 70, "#00ff00", "cycle").await, "ok");
+        assert_eq!(h.read(LOGO), "1 70 00ff00 cycle");
         assert_eq!(
             h.get::<Logo>(LIGHTING, "Logo").await,
-            (true, 70, "#00ff00".into())
+            (true, 70, "#00ff00".into(), "cycle".into())
         );
         assert_eq!(
             h.saved(),
-            "keyboard zoom 4 80 right ff00ff\nlogo 1 70 00ff00\n",
+            "keyboard zoom 4 80 right ff00ff\nlogo 1 70 00ff00 cycle\n",
             "the keyboard part is kept"
+        );
+        assert_eq!(
+            h.get::<Vec<String>>(LIGHTING, "LogoModes").await,
+            ["static", "breathing", "cycle"]
         );
     });
 }
@@ -887,10 +894,20 @@ fn invalid_lighting_requests_never_reach_polkit_or_the_module() {
             );
         }
         assert_eq!(
-            h.set_logo(true, 101, "#ff0000").await,
+            h.set_logo(true, 101, "#ff0000", "static").await,
             err("InvalidArgument")
         );
-        assert_eq!(h.set_logo(true, 50, "green").await, err("InvalidArgument"));
+        assert_eq!(
+            h.set_logo(true, 50, "green", "static").await,
+            err("InvalidArgument")
+        );
+        for mode in ["", "rainbow", "Cycle", "cycle\nstatic", "3"] {
+            assert_eq!(
+                h.set_logo(true, 50, "#00ff00", mode).await,
+                err("InvalidArgument"),
+                "{mode:?}"
+            );
+        }
         assert!(
             h.auth_calls().is_empty(),
             "invalid input must never reach polkit"
@@ -916,7 +933,10 @@ fn lighting_denied_by_polkit_writes_and_saves_nothing() {
             h.set_keyboard("wave", 4, 80, "left", "#000000").await,
             err("NotAuthorized")
         );
-        assert_eq!(h.set_logo(true, 100, "#ff0000").await, err("NotAuthorized"));
+        assert_eq!(
+            h.set_logo(true, 100, "#ff0000", "breathing").await,
+            err("NotAuthorized")
+        );
         assert_eq!(h.snapshot(), before);
         assert_eq!(h.saved(), "");
     });
@@ -925,7 +945,7 @@ fn lighting_denied_by_polkit_writes_and_saves_nothing() {
 #[test]
 fn saved_lighting_is_restored_at_start() {
     async_io::block_on(async {
-        let saved = "keyboard breathing 3 60 left 00ffff\nlogo 1 100 ff0000\n";
+        let saved = "keyboard breathing 3 60 left 00ffff\nlogo 1 100 ff0000 breathing\n";
         let h = Harness::start_with(
             Polkit::Allow,
             Setup {
@@ -936,12 +956,27 @@ fn saved_lighting_is_restored_at_start() {
         .await;
         // Restored before the name is claimed, so already in place.
         assert_eq!(h.read(KEYBOARD), "breathing 3 60 left 00ffff");
-        assert_eq!(h.read(LOGO), "1 100 ff0000");
+        assert_eq!(h.read(LOGO), "1 100 ff0000 breathing");
         assert_eq!(
             h.get::<Keyboard>(LIGHTING, "Keyboard").await,
             ("breathing".into(), 3, 60, "left".into(), "#00ffff".into())
         );
         assert!(h.auth_calls().is_empty(), "restoring is not a new request");
+    });
+}
+
+#[test]
+fn a_logo_saved_before_modes_is_restored_as_static() {
+    async_io::block_on(async {
+        let h = Harness::start_with(
+            Polkit::Allow,
+            Setup {
+                lighting: true,
+                saved: Some("logo 1 80 ff0000\n"),
+            },
+        )
+        .await;
+        assert_eq!(h.read(LOGO), "1 80 ff0000 static");
     });
 }
 
@@ -958,7 +993,7 @@ fn an_invalid_saved_state_is_never_applied() {
         )
         .await;
         assert_eq!(h.read(KEYBOARD), "wave 5 100 left 000000");
-        assert_eq!(h.read(LOGO), "0 0 000000");
+        assert_eq!(h.read(LOGO), "0 0 000000 static");
     });
 }
 
@@ -974,11 +1009,11 @@ fn lighting_is_restored_after_resume_from_logind_only() {
         )
         .await;
         assert_eq!(h.set_keyboard("neon", 2, 90, "left", "#000000").await, "ok");
-        assert_eq!(h.set_logo(true, 40, "#0000ff").await, "ok");
+        assert_eq!(h.set_logo(true, 40, "#0000ff", "cycle").await, "ok");
 
         // The EC forgets during sleep.
         h.write(KEYBOARD, "wave 5 100 left 000000\n");
-        h.write(LOGO, "0 0 000000\n");
+        h.write(LOGO, "0 0 000000 static\n");
 
         // Going to sleep, and a forged signal from someone else: ignored.
         h.sleep_signal(true).await;
@@ -998,7 +1033,7 @@ fn lighting_is_restored_after_resume_from_logind_only() {
         // Waking up, from logind.
         h.sleep_signal(false).await;
         h.wait_for_file(KEYBOARD, "neon 2 90 left 000000").await;
-        h.wait_for_file(LOGO, "1 40 0000ff").await;
+        h.wait_for_file(LOGO, "1 40 0000ff cycle").await;
         assert_eq!(
             h.auth_calls().len(),
             2,

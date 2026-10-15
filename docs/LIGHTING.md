@@ -3,8 +3,9 @@
 > **Status: plan approved on 2026-10-14** (see [the decisions](#decisions-for-approval)).
 > Step 1, the kernel module in
 > [`kmod/helios-acer-lighting/`](../kmod/helios-acer-lighting/), is done and
-> tested on the PHN16-72 (module 0.2.0): the five animated keyboard effects
-> and the lid logo work. The **static** keyboard effect (one fixed colour,
+> tested on the PHN16-72 (module 0.3.0): the five animated keyboard effects
+> and the lid logo work, the logo in three modes (static, breathing, colour
+> cycle). The **static** keyboard effect (one fixed colour,
 > or four zone colours) leaves the keyboard dark on this machine and is
 > left out until it is understood ([results](#hardware-test-results)). The
 > heliosd interface (step 2) and the extension section (step 3) are done.
@@ -110,7 +111,7 @@ the firmware's own ASL.
 | Method | What the firmware does | Why it is excluded |
 |---|---|---|
 | 2, selector `0x01` | turbo-key LED (`TKST`) | not lighting. Selectors `0x08` (`KBST`) and `0x10` (`LBST`) are used since 0.1.3, see [the hardware results](#hardware-test-results) |
-| 10, 11 | other `LB*` fields (`LBET`) of unknown meaning | unknown semantics. Methods 12 and 13 (logo colour) are used since 0.1.6 |
+| 10, 11 | the logo mode, register `LBET` | used since 0.3.0, see [the logo modes](#logo-modes). Methods 12 and 13 (logo colour) are used since 0.1.6 |
 | 14, 16, 22 and the others | fans, misc settings | out of scope: never fans, never the EC beyond lighting |
 
 The module will not even contain the numbers of the excluded methods. The
@@ -176,11 +177,13 @@ Until then, logo support stays out of the D-Bus API.
   | Attribute | Write | Firmware calls |
   |---|---|---|
   | `keyboard_effect` | `<effect> <speed> <brightness> <direction> <rrggbb>`, e.g. `breathing 4 80 right ff0000` | method 20, target 1 |
-  | `logo` | `<on> <brightness> <rrggbb>`, e.g. `1 100 ff0000` | method 12, then method 20 with target 2 carrying only the power |
+  | `logo` | `<on> <brightness> <rrggbb> [<mode>]`, e.g. `1 100 ff0000 cycle` | method 12, then method 20 with target 2 carrying only the power, then method 10 with the mode |
   | `lighting_state` | read only: `kbst=0xNN lbst=0xNN kles=0xNN` | methods 4 and 21; diagnostics for the static effect |
 
   - `effect`: `breathing`, `neon`, `wave`, `shifting` or `zoom`. `static`
     reads back but is not accepted.
+  - `mode`: `static`, `breathing` or `cycle`; left out, it means `static`.
+    It reads back as `unknown` for any other `LBET` value.
   - `speed`: 0 to 9. `brightness`: 0 to 100. `on`: 0 or 1. Plain decimal,
     no sign, no leading zeros.
   - `direction`: `left` (firmware value 1, right to left) or `right` (2,
@@ -190,9 +193,9 @@ Until then, logo support stays out of the D-Bus API.
     newline. Anything else is rejected.
 
   Reading `keyboard_effect` and `logo` returns the current state in the
-  same format (methods 21 and 13). A value Helios cannot set, such as an
+  same format (methods 21, and 13 with 11), the mode always included. A value Helios cannot set, such as an
   effect chosen under Windows, reads back as `unknown`.
-- Operations are serialized by a mutex. The logo's two calls are 100 ms
+- Operations are serialized by a mutex. The logo's three calls are 100 ms
   apart, since the EC applies a write some time after it lands, and a
   write stops at the first firmware error (`-EIO`).
 - The files are root-only (0600 root:root, `lighting_state` 0400). heliosd's
@@ -287,8 +290,9 @@ so the menu stays short:
   brightness and speed sliders, a direction toggle for the effects that
   move (wave, shifting) and colour presets for the effects that show a
   colour (breathing, shifting, zoom).
-- **Lid logo: On/Off**: an on/off switch, then its brightness and colour
-  presets.
+- **Lid logo: Off / <mode>**: an on/off switch, the three modes (Static,
+  Breathing, Color cycle, the current one marked), its brightness, and
+  colour presets except in Color cycle, which ignores the colour.
 
 Nothing changes optimistically: the controls follow what heliosd reports
 back. A slider writes once when the user lets go (or per scroll or arrow-key
@@ -414,6 +418,22 @@ effects; `static` is rejected), `logo`, and the read-only
 `logo_state`, `logo_effect`, and with them methods 2, 6 and 7) are removed;
 they stay in the git history for the static investigation. `KBST` was put
 back to 0, its original value.
+
+### Logo modes
+
+No other driver animates the logo (nekro-sense, Linuwu-Sense, ASense and
+the acer-predator module all set only its colour, brightness and power).
+Tested on 2026-10-15 with an experimental module:
+
+- Method 20 with target 2 and a full effect (any of the five effects, speed
+  1 or 9) changes nothing visible: the logo stays in its method 12 colour.
+- Method 10 (`{1, 0, value}`, written to `LBET`, read back by method 11)
+  selects the animation. Values 0 to 9 were tried: **3 pulses in the logo
+  colour** at a fixed speed, **4 cycles through the colours**, and every
+  other value leaves the logo lit in its colour. None turns it off.
+
+Module 0.3.0 adds the mode to the `logo` line: `static` writes 0,
+`breathing` 3 and `cycle` 4. The experimental attributes are not kept.
 
 ## Safety summary
 

@@ -32,7 +32,7 @@ const DAEMON_FILES: &[&str] = &[
 ];
 
 /// The optional keyboard lighting module (kmod/helios-acer-lighting).
-pub const LIGHTING_MODULE_VERSION: &str = "0.2.0";
+pub const LIGHTING_MODULE_VERSION: &str = "0.3.0";
 const LIGHTING_LOADED: &str = "/sys/module/helios_acer_lighting";
 /// The gaming WMI device the module binds to, and the files it adds there.
 const LIGHTING_DEVICE: &str = crate::lighting::DEVICE;
@@ -825,8 +825,8 @@ mod tests {
                 "sudo modprobe -r helios_acer_lighting",
                 "sudo dkms remove helios-acer-lighting/0.1.0 --all",
                 "sudo rm -r /usr/src/helios-acer-lighting-0.1.0",
-                "sudo cp -rT kmod/helios-acer-lighting /usr/src/helios-acer-lighting-0.2.0",
-                "sudo dkms install helios-acer-lighting/0.2.0",
+                "sudo cp -rT kmod/helios-acer-lighting /usr/src/helios-acer-lighting-0.3.0",
+                "sudo dkms install helios-acer-lighting/0.3.0",
                 "sudo modprobe helios_acer_lighting",
             ]
         );
@@ -865,8 +865,8 @@ mod tests {
         assert_eq!(
             f.fix,
             [
-                "sudo cp -rT kmod/helios-acer-lighting /usr/src/helios-acer-lighting-0.2.0",
-                "sudo dkms install helios-acer-lighting/0.2.0",
+                "sudo cp -rT kmod/helios-acer-lighting /usr/src/helios-acer-lighting-0.3.0",
+                "sudo dkms install helios-acer-lighting/0.3.0",
                 "sudo modprobe helios_acer_lighting",
             ]
         );
@@ -881,8 +881,8 @@ mod tests {
             [
                 "sudo apt install dkms",
                 "sudo apt install linux-headers-7.0.0-38-generic",
-                "sudo cp -rT kmod/helios-acer-lighting /usr/src/helios-acer-lighting-0.2.0",
-                "sudo dkms install helios-acer-lighting/0.2.0",
+                "sudo cp -rT kmod/helios-acer-lighting /usr/src/helios-acer-lighting-0.3.0",
+                "sudo dkms install helios-acer-lighting/0.3.0",
                 "sudo mokutil --import /var/lib/shim-signed/mok/MOK.der",
                 "sudo reboot",
             ]
