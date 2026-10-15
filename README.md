@@ -50,6 +50,15 @@ To configure it, open the extension menu → **Settings**, or run `gnome-extensi
 - choose what the top bar shows (CPU and GPU temperature and usage, fans, power draw, profile) and **reorder** it;
 - add a **graph** of the last 1, 2 or 5 minutes next to any reading, or show the graph alone; pick its width, a line or a filled area, and whether it follows the temperature colors or uses one fixed color;
 - set the **warm and hot thresholds** and their colors. The numbers and the graphs change color when a reading crosses them.
+- turn on **alerts** (see below).
+
+### Alerts
+
+The **Alerts** page in Settings has three options. They react to heliosd's updates (about every 2 s) and use no timers of their own.
+
+- **Heat alert** (on by default): a notification when the CPU or GPU stays at or above 95 °C for 30 s. It comes once per episode and again only after the reading drops 3 °C below the limit. Both numbers can be changed.
+- **Low battery** (on by default): when discharging at 20 % or less on a high-power profile (Performance, Turbo or Max), a notification suggests a quieter one. Once per discharge; it never switches by itself.
+- **Profile when unplugged** (off by default): switches to the chosen on-battery profile (Automatic = Eco, else Quiet) when the charger is unplugged, and restores the previous profile when it is plugged back in, unless you changed the profile in the meantime. It uses the same `SetProfile` call as the menu, so polkit decides.
 
 To remove everything:
 
