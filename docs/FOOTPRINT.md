@@ -15,9 +15,26 @@ Milestone 6: what Helios costs on the machine it watches, and what was done abou
 | heliosd binary | 4.5 MB | **2.3 MB** (heliosctl 0.6 MB) | |
 | D-Bus signals | 1 per 2 s tick | 1 per 2 s tick | ≤ 1 per tick, only on change |
 | nvidia-smi | every 10 s while the GPU is awake, ≈25 ms CPU each (≈0.25 %) | unchanged | never wakes the GPU; ≤ 1 per 10 s |
-| gnome-shell CPU with the extension vs without | +0.68 % of one core | still to measure after reinstalling | |
+| gnome-shell CPU with the extension vs without | +0.68 % of one core | not measured: see below | |
 
 `bench` CPU numbers vary by about ±0.05 % between rounds (CPU frequency, other load); that is why the rounds alternate the two builds. Syscall and file counts are exact.
+
+### The installed build, live
+
+`tools/footprint.sh live 120` after installing this branch, with the desktop in use:
+
+| What | Over 120 s |
+|---|---|
+| heliosd CPU, own | 0.29 s (0.24 %) |
+| heliosd CPU, nvidia-smi runs | 0.39 s (0.33 %) |
+| heliosd resident memory | 4.9 → 5.0 MB |
+| heliosd context switches | 1.0/s |
+| D-Bus PropertiesChanged signals | 0.49/s |
+| NVIDIA GPU awake | 120 of 120 s (held by Xorg and another app, not heliosd) |
+
+Live own CPU is above the bench figure because the installed daemon runs as root and also reads RAPL and the Acer EC, which the bench copy cannot; it was 0.40 % live before this branch.
+
+The extension's cost after the change could not be measured: the on/off run (`tools/footprint.sh extension 60`) came out at −1.2 % because gnome-shell was busy with other work at the time (≈7 % overall against ≈0.5–1 % idle), far more noise than the extension's share. The extension changes only remove work (fewer restyles, no menu updates while closed); re-run the measurement on an idle desktop to put a number on it.
 
 ## What was found
 
