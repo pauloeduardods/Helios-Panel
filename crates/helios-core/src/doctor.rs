@@ -32,11 +32,11 @@ const DAEMON_FILES: &[&str] = &[
 ];
 
 /// The optional keyboard lighting module (kmod/helios-acer-lighting).
-pub const LIGHTING_MODULE_VERSION: &str = "0.1.0";
+pub const LIGHTING_MODULE_VERSION: &str = "0.2.0";
 const LIGHTING_LOADED: &str = "/sys/module/helios_acer_lighting";
 /// The gaming WMI device the module binds to, and the files it adds there.
 const LIGHTING_DEVICE: &str = "/sys/bus/wmi/devices/7A4DDFE7-5B5D-40B4-8595-4408E0CC7F56";
-const LIGHTING_ATTRS: &[&str] = &["keyboard_effect", "keyboard_zones"];
+const LIGHTING_ATTRS: &[&str] = &["keyboard_effect", "logo"];
 /// Models in the module's DMI allow-list.
 const LIGHTING_MODELS: &[&str] = &["Predator PHN16-72"];
 const SECURE_BOOT: &str =
@@ -395,6 +395,30 @@ fn check_lighting(fs: &dyn SysFs) -> Finding {
             &[],
         );
     }
+    let v = LIGHTING_MODULE_VERSION;
+    let copy = format!("sudo cp -rT kmod/helios-acer-lighting /usr/src/helios-acer-lighting-{v}");
+    let install = format!("sudo dkms install helios-acer-lighting/{v}");
+    if let Some(loaded) = fs.read_to_string(&format!("{LIGHTING_LOADED}/version")) {
+        if loaded != v {
+            let fix = [
+                "sudo modprobe -r helios_acer_lighting".to_owned(),
+                format!("sudo dkms remove helios-acer-lighting/{loaded} --all"),
+                format!("sudo rm -r /usr/src/helios-acer-lighting-{loaded}"),
+                copy,
+                install,
+                "sudo modprobe helios_acer_lighting".to_owned(),
+            ];
+            return Finding {
+                check: "lighting",
+                level: Level::Warn,
+                message: format!(
+                    "helios-acer-lighting {loaded} is loaded, but this Helios Panel has {v}. \
+                     Run these from the Helios Panel source directory to update it"
+                ),
+                fix: fix.to_vec(),
+            };
+        }
+    }
     let bound = LIGHTING_ATTRS
         .iter()
         .all(|a| fs.exists(&format!("{LIGHTING_DEVICE}/{a}")));
@@ -426,7 +450,6 @@ fn check_lighting(fs: &dyn SysFs) -> Finding {
         return finding("lighting", Level::Info, msg, &[load]);
     }
 
-    let v = LIGHTING_MODULE_VERSION;
     let mut fix = Vec::new();
     if !fs.exists("/usr/sbin/dkms") {
         fix.push("sudo apt install dkms".to_owned());
@@ -436,10 +459,8 @@ fn check_lighting(fs: &dyn SysFs) -> Finding {
             fix.push(format!("sudo apt install linux-headers-{release}"));
         }
     }
-    fix.push(format!(
-        "sudo cp -r kmod/helios-acer-lighting /usr/src/helios-acer-lighting-{v}"
-    ));
-    fix.push(format!("sudo dkms install helios-acer-lighting/{v}"));
+    fix.push(copy);
+    fix.push(install);
     let msg = if sb {
         fix.push(format!("sudo mokutil --import {DKMS_MOK}"));
         fix.push("sudo reboot".to_owned());
@@ -792,6 +813,26 @@ mod tests {
     }
 
     #[test]
+    fn lighting_module_older_than_helios() {
+        let fs = phn16_72(&[], &[]);
+        fs.set("/sys/module/helios_acer_lighting/version", "0.1.0");
+        let f = get(&doctor(&fs), "lighting").clone();
+        assert_eq!(f.level, Level::Warn);
+        assert!(f.message.contains("0.1.0 is loaded"));
+        assert_eq!(
+            f.fix,
+            [
+                "sudo modprobe -r helios_acer_lighting",
+                "sudo dkms remove helios-acer-lighting/0.1.0 --all",
+                "sudo rm -r /usr/src/helios-acer-lighting-0.1.0",
+                "sudo cp -rT kmod/helios-acer-lighting /usr/src/helios-acer-lighting-0.2.0",
+                "sudo dkms install helios-acer-lighting/0.2.0",
+                "sudo modprobe helios_acer_lighting",
+            ]
+        );
+    }
+
+    #[test]
     fn lighting_installed_but_not_loaded() {
         let ko = (
             "/lib/modules/7.0.0-38-generic/updates/dkms/helios-acer-lighting.ko.zst",
@@ -824,8 +865,8 @@ mod tests {
         assert_eq!(
             f.fix,
             [
-                "sudo cp -r kmod/helios-acer-lighting /usr/src/helios-acer-lighting-0.1.0",
-                "sudo dkms install helios-acer-lighting/0.1.0",
+                "sudo cp -rT kmod/helios-acer-lighting /usr/src/helios-acer-lighting-0.2.0",
+                "sudo dkms install helios-acer-lighting/0.2.0",
                 "sudo modprobe helios_acer_lighting",
             ]
         );
@@ -840,8 +881,8 @@ mod tests {
             [
                 "sudo apt install dkms",
                 "sudo apt install linux-headers-7.0.0-38-generic",
-                "sudo cp -r kmod/helios-acer-lighting /usr/src/helios-acer-lighting-0.1.0",
-                "sudo dkms install helios-acer-lighting/0.1.0",
+                "sudo cp -rT kmod/helios-acer-lighting /usr/src/helios-acer-lighting-0.2.0",
+                "sudo dkms install helios-acer-lighting/0.2.0",
                 "sudo mokutil --import /var/lib/shim-signed/mok/MOK.der",
                 "sudo reboot",
             ]

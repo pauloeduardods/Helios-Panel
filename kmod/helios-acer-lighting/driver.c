@@ -1,18 +1,20 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 /*
- * helios-acer-lighting: keyboard RGB on Acer Predator laptops, through the
- * gaming WMI interface. It binds to the WMI device that mainline acer-wmi
- * calls without binding, so the two coexist, and it only exposes two
- * validated attributes:
+ * helios-acer-lighting: keyboard and lid logo RGB on Acer Predator laptops,
+ * through the gaming WMI interface. It binds to the WMI device that
+ * mainline acer-wmi calls without binding, so the two coexist, and it only
+ * exposes validated, root-only attributes:
  *
  *   keyboard_effect  "<effect> <speed> <brightness> <direction> <rrggbb>"
- *   keyboard_zones   "<brightness> <rrggbb> <rrggbb> <rrggbb> <rrggbb>"
+ *   logo             "<on> <brightness> <rrggbb>"
+ *   lighting_state   read-only diagnostics: "kbst=0xNN lbst=0xNN kles=0xNN"
  *
  * It only binds on the machines in the DMI allow-list below. Nothing is
  * sent to the firmware at load time; only reads and writes of the
  * attributes call it. See docs/LIGHTING.md for the protocol.
  */
 #include <linux/acpi.h>
+#include <linux/delay.h>
 #include <linux/device.h>
 #include <linux/dmi.h>
 #include <linux/module.h>
@@ -24,6 +26,8 @@
 #include "lighting.h"
 
 #define ACER_GAMING_WMI_GUID "7A4DDFE7-5B5D-40B4-8595-4408E0CC7F56"
+/* Time the EC needs to apply one lighting write before the next. */
+#define EC_SETTLE_MS 100
 
 struct helios_lighting {
 	struct wmi_device *wdev;
@@ -53,8 +57,9 @@ static int wmi_call(void *ctx, enum hal_method method, const u8 *in, size_t in_l
 	int ret = -EIO;
 
 	switch (method) {
-	case HAL_SET_ZONE:
-	case HAL_GET_ZONE:
+	case HAL_GET_STATE:
+	case HAL_SET_LOGO:
+	case HAL_GET_LOGO:
 	case HAL_SET_EFFECT:
 	case HAL_GET_EFFECT:
 		break;
@@ -75,6 +80,11 @@ static int wmi_call(void *ctx, enum hal_method method, const u8 *in, size_t in_l
 	}
 	kfree(obj);
 	return ret;
+}
+
+static void ec_pause(void *ctx)
+{
+	msleep(EC_SETTLE_MS);
 }
 
 static ssize_t store(struct device *dev, const char *buf, size_t count,
@@ -114,24 +124,31 @@ static ssize_t keyboard_effect_show(struct device *dev, struct device_attribute 
 	return show(dev, buf, hal_effect_show);
 }
 
-static ssize_t keyboard_zones_store(struct device *dev, struct device_attribute *attr,
-				    const char *buf, size_t count)
-{
-	return store(dev, buf, count, hal_zones_store);
-}
-
-static ssize_t keyboard_zones_show(struct device *dev, struct device_attribute *attr,
+static ssize_t lighting_state_show(struct device *dev, struct device_attribute *attr,
 				   char *buf)
 {
-	return show(dev, buf, hal_zones_show);
+	return show(dev, buf, hal_state_show);
+}
+
+static ssize_t logo_store(struct device *dev, struct device_attribute *attr,
+			  const char *buf, size_t count)
+{
+	return store(dev, buf, count, hal_logo_store);
+}
+
+static ssize_t logo_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	return show(dev, buf, hal_logo_show);
 }
 
 static DEVICE_ATTR_ADMIN_RW(keyboard_effect);
-static DEVICE_ATTR_ADMIN_RW(keyboard_zones);
+static DEVICE_ATTR_ADMIN_RW(logo);
+static DEVICE_ATTR_ADMIN_RO(lighting_state);
 
 static struct attribute *helios_lighting_attrs[] = {
 	&dev_attr_keyboard_effect.attr,
-	&dev_attr_keyboard_zones.attr,
+	&dev_attr_logo.attr,
+	&dev_attr_lighting_state.attr,
 	NULL
 };
 ATTRIBUTE_GROUPS(helios_lighting);
@@ -150,6 +167,7 @@ static int helios_lighting_probe(struct wmi_device *wdev, const void *context)
 	mutex_init(&hl->lock);
 	hl->wdev = wdev;
 	hl->fw.call = wmi_call;
+	hl->fw.pause = ec_pause;
 	hl->fw.ctx = hl;
 	dev_set_drvdata(&wdev->dev, hl);
 	return 0;
@@ -172,6 +190,6 @@ static struct wmi_driver helios_lighting_driver = {
 module_wmi_driver(helios_lighting_driver);
 
 MODULE_AUTHOR("Helios Panel contributors");
-MODULE_DESCRIPTION("Keyboard RGB for Acer Predator laptops (Helios Panel)");
+MODULE_DESCRIPTION("Keyboard and logo RGB for Acer Predator laptops (Helios Panel)");
 MODULE_LICENSE("GPL");
-MODULE_VERSION("0.1.0");
+MODULE_VERSION("0.2.0");
