@@ -108,7 +108,7 @@ the firmware's own ASL.
 | Method | What the firmware does | Why it is excluded |
 |---|---|---|
 | 2, selector `0x01` | turbo-key LED (`TKST`) | not lighting. Selectors `0x08` (`KBST`) and `0x10` (`LBST`) are used since 0.1.3, see [the hardware results](#hardware-test-results) |
-| 10–13 | other `LB*` fields (`LBET`, `LBLR/G/B`, `LBLT`, `LBLF`) of unknown meaning | unknown semantics |
+| 10, 11 | other `LB*` fields (`LBET`) of unknown meaning | unknown semantics. Methods 12 and 13 (logo colour) are used since 0.1.6 |
 | 14, 16, 22 and the others | fans, misc settings | out of scope: never fans, never the EC beyond lighting |
 
 The module will not even contain the numbers of the excluded methods. The
@@ -230,8 +230,8 @@ commands, adapted to what is missing):
 
 ```bash
 sudo apt install dkms linux-headers-$(uname -r)   # if not installed yet
-sudo cp -rT kmod/helios-acer-lighting /usr/src/helios-acer-lighting-0.1.5
-sudo dkms install helios-acer-lighting/0.1.5
+sudo cp -rT kmod/helios-acer-lighting /usr/src/helios-acer-lighting-0.1.6
+sudo dkms install helios-acer-lighting/0.1.6
 ```
 
 Then, with Secure Boot **off**, or **on with the DKMS key already
@@ -401,6 +401,20 @@ Module 0.1.5 tests the next two hypotheses, both approved:
 the zones are addressed as bits 1, 2, 4 and 8 (so `KBST = 15` may light all
 four); and a `logo_effect` attribute, the same line as `keyboard_effect`
 but with target 2, writes and reads the logo's effect.
+
+With 0.1.5 neither helped: `KBST` 15 or 3 changed nothing (zone 1 only),
+and the logo stayed dark through `LBST` and `logo_effect`.
+
+The community drivers for this model (Linuwu-Sense, and
+[nekro-sense](https://github.com/fredac100/nekro-sense), written for the
+PHN16-72) set static zones with exactly the 0.1.1 sequence, so the keyboard
+problem is a state of this machine rather than the bytes; it stays open.
+nekro-sense drives the logo, validated on the PHN16-72, through method 12
+(`0x0C`): selector 1, then red, green, blue, brightness and power, which the
+ASL writes to `LBLR`, `LBLG`, `LBLB`, `LBLT` and `LBLF` only (method 13
+reads them back); then method 20 with target 2 and byte 0 set to the power.
+Module 0.1.6 adds a `logo` attribute, `<on> <brightness> <rrggbb>`, that does
+the same (approved on 2026-10-15).
 
 ## Safety summary
 

@@ -31,6 +31,7 @@ struct fake {
 	u8 zones[HAL_ZONES][3];
 	u8 kbst, lbst;
 	u8 logo_effect[HAL_GET_EFFECT_OUT];
+	u8 logo[HAL_GET_LOGO_OUT];
 };
 
 static int fake_call(void *ctx, enum hal_method method, const u8 *in, size_t in_len,
@@ -60,6 +61,9 @@ static int fake_call(void *ctx, enum hal_method method, const u8 *in, size_t in_
 	switch (method) {
 	case HAL_GET_EFFECT:
 		memcpy(out, in[0] == 2 ? f->logo_effect : f->effect, out_len);
+		break;
+	case HAL_GET_LOGO:
+		memcpy(out, f->logo, out_len);
 		break;
 	case HAL_GET_STATE:
 		if (in[0] == 0x08)
@@ -149,7 +153,7 @@ static void check_invariants(void)
 			CHECK(c->in[2] <= 100, "brightness %u", c->in[2]);
 			CHECK(c->in[3] == 0, "byte 3 is %u", c->in[3]);
 			CHECK(c->in[4] <= 2, "direction %u", c->in[4]);
-			CHECK(c->in[8] == 3, "byte 8 is %u, not 3", c->in[8]);
+			CHECK(c->in[8] == 3 || (c->in[9] == 2 && c->in[8] == 0), "byte 8 is %u", c->in[8]);
 			for (int b = 10; b < 16; b++)
 				CHECK(c->in[b] == 0, "method 20 byte %d is %u", b, c->in[b]);
 			break;
@@ -168,6 +172,17 @@ static void check_invariants(void)
 		case HAL_GET_ZONE:
 			CHECK(c->in_len == HAL_GET_ZONE_IN && c->in[1] == 0 && c->in[2] == 0 &&
 			      c->in[3] == 0, "method 7 input");
+			break;
+		case HAL_SET_LOGO:
+			CHECK(c->in_len == HAL_SET_LOGO_IN, "method 12 size");
+			CHECK(c->in[0] == 1, "method 12 selector %u", c->in[0]);
+			CHECK(c->in[4] <= 100, "logo brightness %u", c->in[4]);
+			CHECK(c->in[5] <= 1, "logo power %u", c->in[5]);
+			CHECK(c->in[6] == 0 && c->in[7] == 0, "method 12 tail");
+			break;
+		case HAL_GET_LOGO:
+			CHECK(c->in_len == HAL_GET_LOGO_IN && c->in[0] == 1 && c->in[1] == 0 &&
+			      c->in[2] == 0 && c->in[3] == 0, "method 13 input");
 			break;
 		case HAL_SET_STATE:
 			CHECK(c->in_len == HAL_SET_STATE_IN, "method 2 size");
@@ -461,6 +476,55 @@ static void test_state_show(void)
 	CHECK(fake.count == 2, "kept reading after a failure");
 }
 
+/* -------------------------------------------------------------------- logo */
+
+static void test_logo(void)
+{
+	static const char *const bad[] = {
+		"", "1", "1 100", "2 100 ff0000", "1 101 ff0000", "1 100 ff000", "on 100 ff0000",
+		"1 100 ff0000 x", "1  100 ff0000",
+	};
+	char buf[HAL_LINE_MAX];
+	const u8 colour[8] = { 1, 0xff, 0x66, 0x00, 70, 1, 0, 0 };
+	const u8 power[16] = { 1, 0, 0, 0, 0, 0, 0, 0, 0, 2 };
+
+	reset();
+	CHECK(hal_logo_store(&fw, "1 70 ff6600\n", 12) == 0, "valid logo line rejected");
+	CHECK(fake.count == 2, "%zu calls, want 2", fake.count);
+	CHECK(fake.calls[0].method == HAL_SET_LOGO, "first call is method 12");
+	check_bytes(&fake.calls[0], colour, 8, "logo colour");
+	CHECK(fake.calls[1].method == HAL_SET_EFFECT, "second call is method 20");
+	check_bytes(&fake.calls[1], power, 16, "logo power");
+	CHECK(fake.calls[1].pauses_before == 1, "no pause before the power call");
+	check_invariants();
+
+	reset();
+	CHECK(hal_logo_store(&fw, "0 0 000000", 10) == 0, "logo off rejected");
+	CHECK(fake.calls[0].in[5] == 0 && fake.calls[1].in[0] == 0, "logo off bytes");
+
+	for (size_t i = 0; i < ARRAY_SIZE(bad); i++) {
+		current = bad[i];
+		reset();
+		CHECK(hal_logo_store(&fw, bad[i], strlen(bad[i])) == -EINVAL, "accepted");
+		CHECK(fake.count == 0, "reached the firmware");
+	}
+	current = "logo";
+
+	reset();
+	fake.fail_at = 1;
+	CHECK(hal_logo_store(&fw, "1 70 ff6600", 11) == -EIO && fake.count == 1,
+	      "kept going after a failed colour write");
+
+	reset();
+	const u8 state[8] = { 0, 0x12, 0x34, 0x56, 80, 1, 0, 0 };
+
+	memcpy(fake.logo, state, sizeof(state));
+	hal_logo_show(&fw, buf);
+	CHECK(!strcmp(buf, "1 80 123456\n"), "show gave \"%s\"", buf);
+	CHECK(fake.calls[0].method == HAL_GET_LOGO, "read uses method 13");
+	check_invariants();
+}
+
 /* ------------------------------------------------------------- logo_effect */
 
 static void test_logo_effect(void)
@@ -585,7 +649,10 @@ static void test_fuzz(void)
 			hal_keyboard_state_store(&fw, line, len);
 			break;
 		case 3:
-			hal_logo_effect_store(&fw, line, len);
+			if (round & 8)
+				hal_logo_effect_store(&fw, line, len);
+			else
+				hal_logo_store(&fw, line, len);
 			break;
 		default:
 			hal_logo_state_store(&fw, line, len);
@@ -615,6 +682,7 @@ int main(void)
 		{ "state show", test_state_show },
 		{ "state store", test_state_store },
 		{ "logo effect", test_logo_effect },
+		{ "logo", test_logo },
 		{ "fuzz", test_fuzz },
 	};
 	size_t n = ARRAY_SIZE(tests);

@@ -34,6 +34,8 @@ enum hal_method {
 	HAL_GET_ZONE = 7,	/* read one zone's colour */
 	HAL_SET_EFFECT = 20,	/* effect, speed, brightness, direction, colour */
 	HAL_GET_EFFECT = 21,	/* read the above */
+	HAL_SET_LOGO = 12,	/* logo colour, brightness and power */
+	HAL_GET_LOGO = 13,	/* read the above */
 };
 
 /* Exact input and output sizes, from the firmware's buffers. */
@@ -49,6 +51,11 @@ enum hal_method {
 #define HAL_SET_EFFECT_OUT 4
 #define HAL_GET_EFFECT_IN 4
 #define HAL_GET_EFFECT_OUT 16
+
+#define HAL_SET_LOGO_IN 8
+#define HAL_SET_LOGO_OUT 4
+#define HAL_GET_LOGO_IN 4
+#define HAL_GET_LOGO_OUT 8
 
 #define HAL_ZONES 4
 #define HAL_MAX_SPEED 9
@@ -96,6 +103,14 @@ int hal_state_show(const struct hal_fw *fw, char *buf);
  */
 int hal_keyboard_state_store(const struct hal_fw *fw, const char *buf, size_t len);
 int hal_logo_state_store(const struct hal_fw *fw, const char *buf, size_t len);
+
+/*
+ * logo: "<on> <brightness> <rrggbb>", on being 0 or 1. Writes the logo's
+ * own colour registers (method 12), then its power through method 20 with
+ * the logo target, as the PHN16-72 driver nekro-sense does.
+ */
+int hal_logo_store(const struct hal_fw *fw, const char *buf, size_t len);
+int hal_logo_show(const struct hal_fw *fw, char *buf);
 
 /* logo_effect: the same line as keyboard_effect, for the lid logo. */
 int hal_logo_effect_store(const struct hal_fw *fw, const char *buf, size_t len);

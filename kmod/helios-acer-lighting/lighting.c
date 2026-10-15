@@ -475,3 +475,53 @@ int hal_logo_state_store(const struct hal_fw *fw, const char *buf, size_t len)
 		in[i] = 0xff;
 	return set_state(fw, in);
 }
+
+int hal_logo_store(const struct hal_fw *fw, const char *buf, size_t len)
+{
+	u8 in[HAL_SET_LOGO_IN] = { 0 };
+	u8 power[HAL_SET_EFFECT_IN] = { 0 };
+	struct tokens t;
+	u8 on, brightness;
+	struct rgb c;
+	int ret;
+
+	if (split(buf, len, &t, 3) ||
+	    parse_uint(t.word[0], t.len[0], 1, &on) ||
+	    parse_uint(t.word[1], t.len[1], HAL_MAX_BRIGHTNESS, &brightness) ||
+	    parse_rgb(t.word[2], t.len[2], &c))
+		return -EINVAL;
+
+	in[0] = 1;	/* the only selector the firmware accepts */
+	in[1] = c.r;
+	in[2] = c.g;
+	in[3] = c.b;
+	in[4] = brightness;
+	in[5] = on;
+	ret = set(fw, HAL_SET_LOGO, in, sizeof(in));
+	if (ret)
+		return ret;
+
+	fw->pause(fw->ctx);
+	power[0] = on;
+	power[9] = TARGET_LOGO;
+	return set(fw, HAL_SET_EFFECT, power, sizeof(power));
+}
+
+int hal_logo_show(const struct hal_fw *fw, char *buf)
+{
+	u8 in[HAL_GET_LOGO_IN] = { 1, 0, 0, 0 };
+	u8 out[HAL_GET_LOGO_OUT] = { 0 };
+	struct line l = { buf, 0 };
+	int ret = fw->call(fw->ctx, HAL_GET_LOGO, in, sizeof(in), out, sizeof(out));
+
+	if (ret)
+		return ret;
+	if (out[0] != 0)
+		return -EIO;
+	put_uint(&l, out[5]);
+	put_str(&l, " ");
+	put_uint(&l, out[4]);
+	put_str(&l, " ");
+	put_rgb(&l, out + 1);
+	return finish(&l);
+}

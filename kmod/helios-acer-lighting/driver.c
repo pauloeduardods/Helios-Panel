@@ -8,6 +8,7 @@
  *   keyboard_effect  "<effect> <speed> <brightness> <direction> <rrggbb>"
  *   keyboard_zones   "<brightness> <rrggbb> <rrggbb> <rrggbb> <rrggbb>"
  *   lighting_state   read-only diagnostics: "kbst=0xNN lbst=0xNN kles=0xNN"
+ *   logo             "<on> <brightness> <rrggbb>": the lid logo's colour and power
  *   logo_effect      the same as keyboard_effect, for the lid logo
  *   keyboard_state   write-only, 0 to 15: the EC keyboard state (KBST)
  *   logo_state       write-only, "0" or "1": the lid logo off or on (LBST)
@@ -66,6 +67,8 @@ static int wmi_call(void *ctx, enum hal_method method, const u8 *in, size_t in_l
 	case HAL_GET_ZONE:
 	case HAL_SET_EFFECT:
 	case HAL_GET_EFFECT:
+	case HAL_SET_LOGO:
+	case HAL_GET_LOGO:
 		break;
 	default:
 		return -EINVAL;
@@ -146,6 +149,17 @@ static ssize_t lighting_state_show(struct device *dev, struct device_attribute *
 	return show(dev, buf, hal_state_show);
 }
 
+static ssize_t logo_store(struct device *dev, struct device_attribute *attr,
+			  const char *buf, size_t count)
+{
+	return store(dev, buf, count, hal_logo_store);
+}
+
+static ssize_t logo_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	return show(dev, buf, hal_logo_show);
+}
+
 static ssize_t logo_effect_store(struct device *dev, struct device_attribute *attr,
 				 const char *buf, size_t count)
 {
@@ -172,6 +186,7 @@ static ssize_t logo_state_store(struct device *dev, struct device_attribute *att
 
 static DEVICE_ATTR_ADMIN_RW(keyboard_effect);
 static DEVICE_ATTR_ADMIN_RW(keyboard_zones);
+static DEVICE_ATTR_ADMIN_RW(logo);
 static DEVICE_ATTR_ADMIN_RW(logo_effect);
 static DEVICE_ATTR_ADMIN_RO(lighting_state);
 static DEVICE_ATTR_WO(keyboard_state);
@@ -180,6 +195,7 @@ static DEVICE_ATTR_WO(logo_state);
 static struct attribute *helios_lighting_attrs[] = {
 	&dev_attr_keyboard_effect.attr,
 	&dev_attr_keyboard_zones.attr,
+	&dev_attr_logo.attr,
 	&dev_attr_logo_effect.attr,
 	&dev_attr_lighting_state.attr,
 	&dev_attr_keyboard_state.attr,
@@ -227,4 +243,4 @@ module_wmi_driver(helios_lighting_driver);
 MODULE_AUTHOR("Helios Panel contributors");
 MODULE_DESCRIPTION("Keyboard RGB for Acer Predator laptops (Helios Panel)");
 MODULE_LICENSE("GPL");
-MODULE_VERSION("0.1.5");
+MODULE_VERSION("0.1.6");
