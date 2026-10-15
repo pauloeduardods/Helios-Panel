@@ -64,6 +64,21 @@ pub const PHN16_72: &[(&str, &str)] = &[
     ("/sys/class/power_supply/hidpp_battery_1/type", "Battery"),
     ("/sys/class/power_supply/hidpp_battery_1/scope", "Device"),
     ("/sys/class/power_supply/hidpp_battery_1/capacity", "95"),
+    // RAPL: the package, its cores subdomain, and the same package again
+    // through MMIO.
+    ("/sys/class/powercap/intel-rapl:0/name", "package-0"),
+    ("/sys/class/powercap/intel-rapl:0/energy_uj", "1000000000"),
+    (
+        "/sys/class/powercap/intel-rapl:0/max_energy_range_uj",
+        "262143328850",
+    ),
+    ("/sys/class/powercap/intel-rapl:0:0/name", "core"),
+    ("/sys/class/powercap/intel-rapl:0:0/energy_uj", "600000000"),
+    ("/sys/class/powercap/intel-rapl-mmio:0/name", "package-0"),
+    (
+        "/sys/class/powercap/intel-rapl-mmio:0/energy_uj",
+        "1000000000",
+    ),
 ];
 
 /// The rest of a healthy PHN16-72 for `doctor`: DMI, acer_wmi loaded with

@@ -11,6 +11,7 @@ pub mod io;
 pub mod nvidia;
 pub mod power;
 pub mod profile;
+pub mod rapl;
 pub mod status;
 
 #[cfg(any(test, feature = "fake"))]

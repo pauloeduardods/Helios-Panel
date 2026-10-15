@@ -65,6 +65,7 @@ crates/
 │   ├── src/hwmon.rs         scan, CPU/AMD GPU/fan resolution, sensor ids
 │   ├── src/nvidia.rs        PCI lookup, runtime-PM gate, query interval
 │   ├── src/power.rs         power source, laptop battery, averaged draw
+│   ├── src/rapl.rs          CPU package draw from the RAPL counter, 2 s minimum window
 │   ├── src/profile.rs       platform profile state, validation, write path
 │   ├── src/status.rs        Status struct (serde) shared by CLI JSON and daemon
 │   └── src/doctor.rs        read-only setup checks over the injected fs
@@ -180,7 +181,7 @@ All properties are read-only and emit `org.freedesktop.DBus.Properties.Propertie
 | Member | Type | Meaning |
 |---|---|---|
 | `Version` | `s` | heliosd version, e.g. `0.2.0` |
-| `ApiVersion` | `u` | `2`; raised for compatible additions (2 added `GpuPower`, `PowerSource`, `Battery`) |
+| `ApiVersion` | `u` | `3`; raised for compatible additions (2 added `GpuPower`, `PowerSource`, `Battery`; 3 added `CpuPower`) |
 
 ### `io.github.pauloeduardods.Helios1.Sensors`
 
@@ -191,6 +192,7 @@ All properties are read-only and emit `org.freedesktop.DBus.Properties.Propertie
 | `Fans` | `a(si)` | (label, rpm; `-1` = unreadable) |
 | `Temperatures` | `a(sssd)` | every readable hwmon temperature: (id, chip, label, °C), for clients that let the user pick a sensor; unreadable sensors are left out |
 | `GpuPower` | `(bd)` | (valid, W): NVIDIA board draw, from the same rate-limited `nvidia-smi` query as the temperature |
+| `CpuPower` | `(bd)` | (valid, W): CPU package draw from RAPL, averaged over at least 2 s and rounded to 0.1 W (PLATYPUS, CVE-2020-8694); invalid until the second read and without RAPL |
 | `PowerSource` | `s` | `ac`, `battery` or `unknown` (no system `Mains` supply and the battery is not discharging) |
 | `Battery` | `(ssdddii)` | (name, state `charging`/`discharging`/`full`/`not-charging`/`unknown`, %, W, health %, cycles, minutes left); name `""` = no battery, `-1` = unknown |
 

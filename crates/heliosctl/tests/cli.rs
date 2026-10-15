@@ -116,6 +116,9 @@ fn json_status_phn16_72_with_the_gpu_asleep() {
     assert_eq!(status["schema"], 1);
     assert_eq!(status["cpu"]["sensor"], "hwmon:coretemp/Package id 0");
     assert_eq!(status["cpu"]["celsius"], 61.0);
+    // The fixture's counter is readable here, so heliosctl read it twice,
+    // 2 s apart; it does not move, hence 0 W.
+    assert_eq!(status["cpu"]["watts"], 0.0);
     assert_eq!(status["gpu"]["state"], "off");
     assert_eq!(status["gpu"]["celsius"], Value::Null);
     assert_eq!(status["fans"][1]["rpm"], 2600);

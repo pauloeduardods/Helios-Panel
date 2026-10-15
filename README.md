@@ -7,7 +7,7 @@ Laptop sensors and the platform profile for Linux, with a GNOME Shell top-bar ex
 - optionally, the **fan** speed;
 - optionally, the **power draw** while on battery (a dimmed `AC` when plugged in).
 
-The menu also shows the battery charge and state, the time left, the battery health (full capacity against the design capacity) and the NVIDIA GPU's power draw.
+The menu also shows the battery charge and state, the time left, the battery health (full capacity against the design capacity) the CPU package draw and the NVIDIA GPU's power draw.
 
 It was built for the Acer Predator Helios Neo 16 (PHN16-72), but it works on any PC with sensors in `/sys/class/hwmon`, including Ryzen CPUs and Radeon GPUs.
 
@@ -76,9 +76,14 @@ What goes where:
 | Fans | `acer` hwmon (from `acer_wmi`) |
 | Power source, battery, draw | `/sys/class/power_supply` (the laptop's own `Mains` and `Battery`; peripherals such as a wireless mouse are skipped) |
 | NVIDIA GPU draw | `nvidia-smi`, in the same query as the temperature |
+| CPU package draw | RAPL energy counter, `/sys/class/powercap/intel-rapl:N` (Intel and AMD) |
 | Profile | `/sys/firmware/acpi/platform_profile` |
 
-Reading never needs root. heliosd reads everything once every 2 seconds for all clients, and clients are told only when something changes.
+Reading never needs root, with one exception: the RAPL counter behind the CPU draw is root-only. heliosd already runs as root and owns the file, so it needs no extra privilege, and it publishes that draw only as an average over at least 2 seconds rounded to 0.1 W (see below). `heliosctl status` run as a normal user shows no CPU draw. heliosd reads everything once every 2 seconds for all clients, and clients are told only when something changes.
+
+### Why the CPU draw is coarse
+
+The kernel made RAPL root-only after the [PLATYPUS](https://platypusattack.com/) attack (CVE-2020-8694), which recovers secrets from fast, fine-grained energy samples. heliosd shares the reading with every user, so it never publishes anything finer than one 2-second average, rounded to 0.1 W: enough to see what the CPU draws, far too coarse for that attack.
 
 ### Why the draw is only shown on battery
 

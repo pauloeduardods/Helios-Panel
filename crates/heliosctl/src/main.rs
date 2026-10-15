@@ -8,6 +8,7 @@ use helios_core::GpuQuery;
 use helios_core::doctor::{self, Level, Report};
 use helios_core::nvidia::GpuState;
 use helios_core::power::{BatteryState, PowerSource, PowerStatus};
+use helios_core::rapl;
 use helios_core::status::{Monitor, Status};
 use helios_sys::{NvidiaSmi, RootedFs, SystemClock};
 
@@ -145,11 +146,13 @@ fn render(status: &Status) -> String {
     let mut out = String::new();
     let mut line = |name: &str, value: String| out.push_str(&format!("{name:<9}{value}\n"));
 
-    let cpu_source = status.cpu.sensor.as_deref().unwrap_or("no sensor found");
-    line(
-        "CPU",
-        format!("{}  ({cpu_source})", celsius(status.cpu.celsius)),
-    );
+    let cpu = &status.cpu;
+    let cpu_source = cpu.sensor.as_deref().unwrap_or("no sensor found");
+    let cpu_value = match cpu.watts {
+        Some(watts) => format!("{}, {watts:.1} W", celsius(cpu.celsius)),
+        None => celsius(cpu.celsius),
+    };
+    line("CPU", format!("{cpu_value}  ({cpu_source})"));
 
     let gpu = &status.gpu;
     let gpu_value = match gpu.state {
@@ -204,11 +207,15 @@ fn status(options: &Options, json: bool) -> Result<String, String> {
         Some(path) => Some(NvidiaSmi::new(path, NvidiaSmi::DEFAULT_TIMEOUT)),
         None => NvidiaSmi::find(),
     };
-    let status = Monitor::new(&fs).poll(
-        &fs,
-        smi.as_ref().map(|s| s as &dyn GpuQuery),
-        &SystemClock::new(),
-    );
+    let smi = smi.as_ref().map(|s| s as &dyn GpuQuery);
+    let clock = SystemClock::new();
+    let mut monitor = Monitor::new(&fs);
+    let mut status = monitor.poll(&fs, smi, &clock);
+    // Only as root: the CPU draw needs a second read of its counter.
+    if monitor.cpu_power_pending() {
+        std::thread::sleep(rapl::WINDOW);
+        status = monitor.poll(&fs, smi, &clock);
+    }
     if json {
         serde_json::to_string_pretty(&status)
             .map(|s| s + "\n")
@@ -405,6 +412,21 @@ Choices  low-power, quiet, balanced, balanced-performance, performance
         );
         assert!(
             text.contains("Battery  80%, discharging  (BAT1, health 92%, 312 cycles)\n"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn human_output_with_cpu_draw() {
+        let fs = FakeFs::new(PHN16_72);
+        let clock = FakeClock::starting_at(0);
+        let mut monitor = Monitor::new(&fs);
+        monitor.poll(&fs, None, &clock);
+        fs.set("/sys/class/powercap/intel-rapl:0/energy_uj", "1024680000");
+        clock.advance(2);
+        let text = render(&monitor.poll(&fs, None, &clock));
+        assert!(
+            text.starts_with("CPU      61.0 °C, 12.3 W  (hwmon:coretemp/Package id 0)\n"),
             "{text}"
         );
     }

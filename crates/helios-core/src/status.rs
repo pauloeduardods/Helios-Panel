@@ -9,6 +9,7 @@ use crate::io::{Clock, GpuQuery, SysFs, read_int};
 use crate::nvidia::{GpuState, NvidiaGpu};
 use crate::power::{PowerMonitor, PowerStatus};
 use crate::profile::{self, ProfileState};
+use crate::rapl::CpuPowerMeter;
 
 /// Bumped on incompatible changes to the JSON layout.
 pub const SCHEMA_VERSION: u32 = 1;
@@ -31,6 +32,8 @@ pub struct Status {
 pub struct CpuStatus {
     pub sensor: Option<String>,
     pub celsius: Option<f64>,
+    /// Package draw from RAPL; needs root and two polls.
+    pub watts: Option<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -66,11 +69,12 @@ fn read_celsius(fs: &dyn SysFs, path: &str) -> Option<f64> {
 }
 
 /// Keeps the state that must survive between polls (the NVIDIA rate limit,
-/// the averaged battery draw).
+/// the averaged battery draw, the last RAPL counter).
 #[derive(Debug)]
 pub struct Monitor {
     nvidia: Option<NvidiaGpu>,
     power: PowerMonitor,
+    cpu_power: CpuPowerMeter,
 }
 
 impl Monitor {
@@ -78,7 +82,14 @@ impl Monitor {
         Self {
             nvidia: NvidiaGpu::detect(fs),
             power: PowerMonitor::default(),
+            cpu_power: CpuPowerMeter::default(),
         }
+    }
+
+    /// The CPU draw is readable but needs another poll after
+    /// [`crate::rapl::WINDOW`] to have a value.
+    pub fn cpu_power_pending(&self) -> bool {
+        self.cpu_power.pending()
     }
 
     /// `gpu_query` is `None` when nvidia-smi is not installed.
@@ -95,6 +106,7 @@ impl Monitor {
         let cpu = CpuStatus {
             celsius: cpu.as_ref().and_then(|s| read_celsius(fs, &s.path)),
             sensor: cpu.map(|s| s.id()),
+            watts: self.cpu_power.read(fs, clock),
         };
 
         let gpu = if let Some(amd) = hwmon::resolve_amd_gpu(&chips) {
@@ -171,7 +183,7 @@ mod tests {
             serde_json::to_value(&status).unwrap(),
             json!({
                 "schema": 1,
-                "cpu": {"sensor": "hwmon:coretemp/Package id 0", "celsius": 61.0},
+                "cpu": {"sensor": "hwmon:coretemp/Package id 0", "celsius": 61.0, "watts": null},
                 "gpu": {"source": "nvidia-smi", "state": "off", "celsius": null, "watts": null},
                 "fans": [{"label": "Fan 1", "rpm": 2350}, {"label": "Fan 2", "rpm": 2600}],
                 "power": {
@@ -212,6 +224,20 @@ mod tests {
             }
         );
         assert_eq!(smi.calls(), 1);
+    }
+
+    #[test]
+    fn cpu_draw_needs_a_second_poll() {
+        let fs = FakeFs::new(PHN16_72);
+        let clock = FakeClock::starting_at(0);
+        let mut monitor = Monitor::new(&fs);
+        assert_eq!(monitor.poll(&fs, None, &clock).cpu.watts, None);
+        assert!(monitor.cpu_power_pending());
+
+        fs.set("/sys/class/powercap/intel-rapl:0/energy_uj", "1024680000");
+        clock.advance(2);
+        assert_eq!(monitor.poll(&fs, None, &clock).cpu.watts, Some(12.3));
+        assert!(!monitor.cpu_power_pending());
     }
 
     #[test]

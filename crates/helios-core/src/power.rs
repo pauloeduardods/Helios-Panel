@@ -72,7 +72,7 @@ pub struct PowerStatus {
 }
 
 /// Rounds to 0.1 so noise does not look like a change.
-fn round_tenth(value: f64) -> f64 {
+pub(crate) fn round_tenth(value: f64) -> f64 {
     (value * 10.0).round() / 10.0
 }
 

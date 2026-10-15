@@ -17,6 +17,8 @@ pub type Fan = (String, i32);
 pub type Temperature = (String, String, String, f64);
 /// (valid, W)
 pub type GpuPower = (bool, f64);
+/// (valid, W)
+pub type CpuPower = (bool, f64);
 /// (name, state, %, W, health %, cycles, minutes left); name "" = no battery,
 /// -1 = unknown
 pub type Battery = (String, String, f64, f64, f64, i32, i32);
@@ -28,6 +30,7 @@ pub struct SensorsProps {
     pub fans: Vec<Fan>,
     pub temperatures: Vec<Temperature>,
     pub gpu_power: GpuPower,
+    pub cpu_power: CpuPower,
     pub power_source: String,
     pub battery: Battery,
 }
@@ -123,6 +126,7 @@ impl From<&Status> for SensorsProps {
                 .filter_map(|t| Some((t.id.clone(), t.chip.clone(), t.label.clone(), t.celsius?)))
                 .collect(),
             gpu_power: reading(s.gpu.watts),
+            cpu_power: reading(s.cpu.watts),
             power_source: power_source_name(s.power.source).to_owned(),
             battery: battery(s),
         }
@@ -159,6 +163,9 @@ pub fn sensors_changes(old: &SensorsProps, new: &SensorsProps) -> Changes {
     }
     if old.gpu_power != new.gpu_power {
         out.push(("GpuPower", Value::from(new.gpu_power)));
+    }
+    if old.cpu_power != new.cpu_power {
+        out.push(("CpuPower", Value::from(new.cpu_power)));
     }
     if old.power_source != new.power_source {
         out.push(("PowerSource", Value::from(new.power_source.clone())));
@@ -212,6 +219,7 @@ mod tests {
         );
         assert_eq!(sensors.temperatures.len(), 4);
         assert_eq!(sensors.gpu_power, (false, 0.0));
+        assert_eq!(sensors.cpu_power, (false, 0.0), "first poll: no value yet");
         assert_eq!(sensors.power_source, "ac");
         assert_eq!(
             sensors.battery,
@@ -303,6 +311,23 @@ mod tests {
                 172
             )
         );
+    }
+
+    #[test]
+    fn cpu_power_is_published_from_the_second_poll() {
+        let fs = FakeFs::new(PHN16_72);
+        let clock = FakeClock::starting_at(0);
+        let mut monitor = Monitor::new(&fs);
+        let before = SensorsProps::from(&monitor.poll(&fs, None, &clock));
+        fs.set("/sys/class/powercap/intel-rapl:0/energy_uj", "1024680000");
+        clock.advance(2);
+        let after = SensorsProps::from(&monitor.poll(&fs, None, &clock));
+        assert_eq!(after.cpu_power, (true, 12.3));
+        let names: Vec<_> = sensors_changes(&before, &after)
+            .into_iter()
+            .map(|(n, _)| n)
+            .collect();
+        assert_eq!(names, ["CpuPower"]);
     }
 
     #[test]
