@@ -223,3 +223,82 @@ test('history: false skips GetHistory and keeps no samples, but still reports ch
     assert.equal(client.snapshot().sensors.cpu.celsius, 65);
     assert.deepEqual(client.historyView().ages, []);
 });
+
+// ---------------------------------------------------------------- lighting
+
+function withLighting() {
+    globalThis.FAKE_BUS.props[`${IFACE}.Lighting`] = {
+        Effects: ['breathing', 'neon', 'wave', 'shifting', 'zoom'],
+        Directions: ['left', 'right'],
+        Keyboard: ['zoom', 4, 80, 'right', '#ff00ff'],
+        Logo: [true, 100, '#00ff00'],
+    };
+}
+
+test('lighting comes from the Lighting proxy', async () => {
+    withLighting();
+    const {client} = start();
+    globalThis.FAKE_BUS.appear();
+    await tick();
+    const {lighting} = client.snapshot();
+    assert.equal(lighting.available, true);
+    assert.equal(lighting.keyboard.effect, 'zoom');
+    assert.deepEqual(lighting.logo, {on: true, brightness: 100, color: '#00ff00'});
+});
+
+test('without the module (or an older heliosd) lighting is unavailable, the rest works', async () => {
+    const {client} = start();
+    globalThis.FAKE_BUS.appear();
+    await tick();
+    const snap = client.snapshot();
+    assert.equal(snap.state, 'running');
+    assert.equal(snap.lighting.available, false);
+    assert.equal(snap.profile.current, 'balanced');
+});
+
+test('lighting changes notify the indicator', async () => {
+    withLighting();
+    const {changes} = start();
+    globalThis.FAKE_BUS.appear();
+    await tick();
+    const before = changes();
+    globalThis.FAKE_BUS.proxies[`${IFACE}.Lighting`].emit('g-properties-changed');
+    assert.equal(changes(), before + 1);
+});
+
+test('setKeyboardEffect and setLogo call heliosd with the exact signatures', async () => {
+    withLighting();
+    const {client} = start();
+    globalThis.FAKE_BUS.appear();
+    await tick();
+    await client.setKeyboardEffect(['wave', 4, 80, 'left', '#ff0000']);
+    await client.setLogo([true, 70, '#00ff00']);
+    const [kb, logo] = globalThis.FAKE_BUS.calls.filter(c => c.iface === `${IFACE}.Lighting`);
+    assert.equal(kb.method, 'SetKeyboardEffect');
+    assert.equal(kb.params.type, '(suuss)');
+    assert.deepEqual(kb.params.value, ['wave', 4, 80, 'left', '#ff0000']);
+    assert.ok(kb.timeout >= 60000, 'polkit may prompt');
+    assert.equal(logo.method, 'SetLogo');
+    assert.equal(logo.params.type, '(bus)');
+    assert.deepEqual(logo.params.value, [true, 70, '#00ff00']);
+});
+
+test('lighting errors carry the heliosd error name', async () => {
+    withLighting();
+    const {client} = start();
+    globalThis.FAKE_BUS.appear();
+    await tick();
+    globalThis.FAKE_BUS.callError = new GLib.Error(
+        'GDBus.Error:io.github.pauloeduardods.Helios1.Error.InvalidArgument: speed 10 is not 0 to 9',
+        'io.github.pauloeduardods.Helios1.Error.InvalidArgument');
+    await assert.rejects(client.setKeyboardEffect(['wave', 10, 80, 'left', '#ff0000']),
+        {name: 'InvalidArgument', message: 'speed 10 is not 0 to 9'});
+});
+
+test('lighting writes while heliosd is not running fail without a call', async () => {
+    const {client} = start();
+    globalThis.FAKE_BUS.vanish();
+    await assert.rejects(client.setLogo([true, 100, '#ffffff']), {name: 'NotRunning'});
+    await assert.rejects(client.setKeyboardEffect(['wave', 4, 80, 'left', '#ff0000']), {name: 'NotRunning'});
+    assert.equal(globalThis.FAKE_BUS.calls.length, 0);
+});

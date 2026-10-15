@@ -534,3 +534,118 @@ export function setProfileError(name, message) {
         return message || 'Could not change the profile';
     }
 }
+
+// ---------------------------------------------------------------- lighting
+
+/** Colour presets offered for the keyboard and the logo, in menu order. */
+export const LIGHT_COLORS = Object.freeze([
+    {name: 'Red', color: '#ff0000'},
+    {name: 'Orange', color: '#ff6000'},
+    {name: 'Yellow', color: '#ffd000'},
+    {name: 'Green', color: '#00ff00'},
+    {name: 'Cyan', color: '#00ffff'},
+    {name: 'Blue', color: '#0000ff'},
+    {name: 'Purple', color: '#8000ff'},
+    {name: 'Pink', color: '#ff00a0'},
+    {name: 'White', color: '#ffffff'},
+]);
+
+const EFFECT_LABELS = Object.freeze({
+    breathing: 'Breathing',
+    neon: 'Neon',
+    wave: 'Wave',
+    shifting: 'Shifting',
+    zoom: 'Zoom',
+    static: 'Static',
+});
+
+/** Effects whose colour the keyboard shows (neon and wave cycle colours). */
+export const EFFECTS_WITH_COLOR = Object.freeze(['breathing', 'shifting', 'zoom']);
+/** Effects that move in a direction. */
+export const EFFECTS_WITH_DIRECTION = Object.freeze(['wave', 'shifting']);
+
+/** The effects heliosd can set (its Effects property says the same). */
+export const KEYBOARD_EFFECTS = Object.freeze(['breathing', 'neon', 'wave', 'shifting', 'zoom']);
+
+/** Used when the keyboard shows something Helios cannot set. */
+const KEYBOARD_DEFAULT = Object.freeze({
+    effect: 'wave', speed: 4, brightness: 100, direction: 'right', color: '#ffffff',
+});
+
+export function effectLabel(id) {
+    return EFFECT_LABELS[id] ?? 'Other';
+}
+
+/** The Lighting interface; `available` is false without the module or on an older heliosd. */
+export function lightingFromDbus({Effects, Directions, Keyboard, Logo} = {}) {
+    if (!Array.isArray(Keyboard) || !Array.isArray(Logo))
+        return {available: false, effects: [], directions: [], keyboard: null, logo: null};
+    const [effect, speed, brightness, direction, color] = Keyboard;
+    const [on, logoBrightness, logoColor] = Logo;
+    return {
+        available: true,
+        effects: Effects ?? [],
+        directions: Directions ?? [],
+        keyboard: {effect, speed, brightness, direction, color},
+        logo: {on, brightness: logoBrightness, color: logoColor},
+    };
+}
+
+function clamp(value, max) {
+    return Math.max(0, Math.min(max, Math.round(value)));
+}
+
+/**
+ * The SetKeyboardEffect arguments for changing `change` on top of the
+ * current state. Anything the current state cannot provide (an effect
+ * Helios cannot set, an unknown direction) falls back to a default.
+ */
+export function keyboardRequest(current, change, effects = KEYBOARD_EFFECTS) {
+    const base = {...KEYBOARD_DEFAULT};
+    if (current) {
+        // The speed of an effect Helios cannot set means nothing for ours.
+        if (effects.includes(current.effect)) {
+            base.effect = current.effect;
+            if (Number.isFinite(current.speed))
+                base.speed = clamp(current.speed, 9);
+        }
+        if (Number.isFinite(current.brightness))
+            base.brightness = clamp(current.brightness, 100);
+        if (current.direction === 'left' || current.direction === 'right')
+            base.direction = current.direction;
+        if (/^#[0-9a-f]{6}$/i.test(current.color ?? '') && current.color !== '#000000')
+            base.color = current.color;
+    }
+    const next = {...base, ...change};
+    return [next.effect, clamp(next.speed, 9), clamp(next.brightness, 100), next.direction, next.color];
+}
+
+/**
+ * The SetLogo arguments. Turning the logo on at brightness 0, or in black,
+ * would show nothing, so those become full brightness and white.
+ */
+export function logoRequest(current, change) {
+    const next = {on: false, brightness: 100, color: '#ffffff', ...current, ...change};
+    let brightness = clamp(next.brightness, 100);
+    let color = /^#[0-9a-f]{6}$/i.test(next.color ?? '') ? next.color : '#ffffff';
+    if (next.on && brightness === 0)
+        brightness = 100;
+    if (next.on && color === '#000000')
+        color = '#ffffff';
+    return [next.on === true, brightness, color];
+}
+
+export function lightingError(name, message) {
+    switch (name) {
+    case 'NotAuthorized':
+        return 'Not authorized to change the lighting';
+    case 'InvalidArgument':
+        return 'The keyboard does not accept that setting';
+    case 'Unavailable':
+        return 'Keyboard lighting is not available (see: heliosctl doctor)';
+    case 'NotRunning':
+        return 'heliosd is not running';
+    default:
+        return message || 'Could not change the lighting';
+    }
+}

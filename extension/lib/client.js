@@ -10,7 +10,8 @@ import GLib from 'gi://GLib';
 import Gio from 'gi://Gio';
 
 import {
-    HistoryBuffer, historySample, powerFromDbus, profileFromDbus, sensorsFromDbus, usageFromDbus,
+    HistoryBuffer, historySample, lightingFromDbus, powerFromDbus, profileFromDbus, sensorsFromDbus,
+    usageFromDbus,
 } from './model.js';
 
 export const BUS_NAME = 'io.github.pauloeduardods.Helios1';
@@ -18,8 +19,9 @@ export const OBJECT_PATH = '/io/github/pauloeduardods/Helios1';
 const IFACE = 'io.github.pauloeduardods.Helios1';
 const ERROR_PREFIX = `${IFACE}.Error.`;
 
-/** Polkit may show a password prompt, so this call can take a while. */
+/** Polkit may show a password prompt, so these calls can take a while. */
 const SET_PROFILE_TIMEOUT_MS = 120000;
+const SET_LIGHTING_TIMEOUT_MS = 120000;
 
 /** GetHistory only copies memory; anything slower is a stuck daemon. */
 const HISTORY_TIMEOUT_MS = 2000;
@@ -57,9 +59,31 @@ const INTROSPECTION = `
       <arg name="profile" type="s" direction="in"/>
     </method>
   </interface>
+  <interface name="${IFACE}.Lighting">
+    <property name="Effects" type="as" access="read"/>
+    <property name="Directions" type="as" access="read"/>
+    <property name="Keyboard" type="(suuss)" access="read"/>
+    <property name="Logo" type="(bus)" access="read"/>
+    <method name="SetKeyboardEffect">
+      <arg name="effect" type="s" direction="in"/>
+      <arg name="speed" type="u" direction="in"/>
+      <arg name="brightness" type="u" direction="in"/>
+      <arg name="direction" type="s" direction="in"/>
+      <arg name="color" type="s" direction="in"/>
+    </method>
+    <method name="SetLogo">
+      <arg name="on" type="b" direction="in"/>
+      <arg name="brightness" type="u" direction="in"/>
+      <arg name="color" type="s" direction="in"/>
+    </method>
+  </interface>
 </node>`;
 
-const PROXIES = Object.freeze({daemon: 'Daemon', sensors: 'Sensors', profile: 'Profile'});
+// Lighting exists only with the kernel module; without it the proxy simply
+// has no cached properties.
+const PROXIES = Object.freeze({
+    daemon: 'Daemon', sensors: 'Sensors', profile: 'Profile', lighting: 'Lighting',
+});
 
 let nodeInfo = null;
 function interfaceInfo(name) {
@@ -94,7 +118,7 @@ function cachedProps(proxy, names) {
     return out;
 }
 
-/** A failed SetProfile: `name` is the heliosd error without its prefix. */
+/** A failed write: `name` is the heliosd error without its prefix. */
 export class HeliosError extends Error {
     constructor(name, message) {
         super(message);
@@ -146,6 +170,7 @@ export class HeliosClient {
             usage: usageFromDbus(p ? cachedProps(p.sensors, ['CpuUsage', 'CpuFrequency', 'GpuUsage']) : {}),
             power: powerFromDbus(p ? cachedProps(p.sensors, ['GpuPower', 'CpuPower', 'PowerSource', 'Battery']) : {}),
             profile: profileFromDbus(p ? cachedProps(p.profile, ['Available', 'Active', 'Choices', 'Driver']) : {}),
+            lighting: lightingFromDbus(p ? cachedProps(p.lighting, ['Effects', 'Directions', 'Keyboard', 'Logo']) : {}),
         };
     }
 
@@ -162,16 +187,31 @@ export class HeliosClient {
         });
     }
 
-    /** Rejects with a HeliosError. */
-    async setProfile(id) {
-        const proxy = this._proxies?.profile;
+    /** Calls a write method; rejects with a HeliosError. */
+    async _write(key, method, params, timeoutMs) {
+        const proxy = this._proxies?.[key];
         if (!proxy)
             throw new HeliosError('NotRunning', 'heliosd is not running');
         try {
-            await this._call(proxy, 'SetProfile', new GLib.Variant('(s)', [id]), SET_PROFILE_TIMEOUT_MS);
+            await this._call(proxy, method, params, timeoutMs);
         } catch (e) {
             throw toHeliosError(e);
         }
+    }
+
+    setProfile(id) {
+        return this._write('profile', 'SetProfile', new GLib.Variant('(s)', [id]), SET_PROFILE_TIMEOUT_MS);
+    }
+
+    /** @param {[string, number, number, string, string]} args see keyboardRequest */
+    setKeyboardEffect(args) {
+        return this._write('lighting', 'SetKeyboardEffect', new GLib.Variant('(suuss)', args),
+            SET_LIGHTING_TIMEOUT_MS);
+    }
+
+    /** @param {[boolean, number, string]} args see logoRequest */
+    setLogo(args) {
+        return this._write('lighting', 'SetLogo', new GLib.Variant('(bus)', args), SET_LIGHTING_TIMEOUT_MS);
     }
 
     /** The recent history as {ages, series} (see HistoryBuffer.view). */

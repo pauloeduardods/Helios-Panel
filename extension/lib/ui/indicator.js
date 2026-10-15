@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // The top-bar button: the segments of the user's layout in the panel (see
-// lib/layout.js), details and the profile switcher in its menu. Everything
+// lib/layout.js), details, the profile switcher and the lighting controls in
+// its menu. Everything
 // comes from heliosd through HeliosClient; this file only renders. It has no timers: it redraws when heliosd reports
 // a change or a setting changes. The graphs draw the history HeliosClient
 // keeps, so they cost no extra D-Bus calls.
@@ -13,6 +14,7 @@ import Clutter from 'gi://Clutter';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
 import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
+import {Slider} from 'resource:///org/gnome/shell/ui/slider.js';
 
 import {HeliosClient} from '../client.js';
 import {paintBars, paintPieces} from '../draw.js';
@@ -21,9 +23,10 @@ import {
     seriesLevelOf,
 } from '../layout.js';
 import {
-    Level, barPieces, batteryStateLabel, daemonMessage, formatClock, formatDuration, formatPercent,
-    formatTemp, formatWatts, parseColor, pickCpu, pickGpu, profileLabel, setProfileError,
-    sparklinePieces, tempLevel,
+    EFFECTS_WITH_COLOR, EFFECTS_WITH_DIRECTION, LIGHT_COLORS, Level, barPieces, batteryStateLabel,
+    daemonMessage, effectLabel, formatClock, formatDuration, formatPercent, formatTemp, formatWatts,
+    keyboardRequest, lightingError, logoRequest, parseColor, pickCpu, pickGpu, profileLabel,
+    setProfileError, sparklinePieces, tempLevel,
 } from '../model.js';
 
 function makeSegment(iconPath = null) {
@@ -76,6 +79,74 @@ function makeSparkline(draw) {
     area.connect('repaint', () => draw(area));
     item.add_child(area);
     return {item, area};
+}
+
+/**
+ * A labelled slider; `onCommit(value)` runs when the user lets go of a drag,
+ * or on each scroll or arrow-key step, so a drag is one write. `set(value)`
+ * moves it without committing, and not while the user drags it.
+ */
+function makeSliderRow(title, onCommit) {
+    const item = new PopupMenu.PopupBaseMenuItem({activate: false});
+    const label = new St.Label({
+        text: title, style_class: 'helios-slider-label', y_align: Clutter.ActorAlign.CENTER,
+    });
+    const slider = new Slider(0);
+    slider.x_expand = true;
+    let dragging = false;
+    let updating = false;
+    slider.connect('drag-begin', () => {
+        dragging = true;
+    });
+    slider.connect('drag-end', () => {
+        dragging = false;
+        onCommit(slider.value);
+    });
+    slider.connect('notify::value', () => {
+        if (!dragging && !updating)
+            onCommit(slider.value);
+    });
+    const row = {
+        item,
+        set(value) {
+            if (dragging)
+                return;
+            updating = true;
+            slider.value = Math.max(0, Math.min(1, value));
+            updating = false;
+        },
+    };
+    item.add_child(label);
+    item.add_child(slider);
+    return row;
+}
+
+/** A row of colour buttons; `onPick(color)` runs on a click. */
+function makeSwatchRow(onPick) {
+    const item = new PopupMenu.PopupBaseMenuItem({reactive: false, can_focus: false});
+    const box = new St.BoxLayout({style_class: 'helios-swatches', x_expand: true});
+    const buttons = LIGHT_COLORS.map(({name, color}) => {
+        const button = new St.Button({
+            style_class: 'helios-swatch', accessible_name: name, can_focus: true,
+            style: `background-color: ${color};`,
+        });
+        button.connect('clicked', () => onPick(color));
+        box.add_child(button);
+        return {button, color};
+    });
+    item.add_child(box);
+    return {
+        item,
+        /** Marks the button of `color`, if it is a preset. */
+        select(color) {
+            for (const b of buttons) {
+                if (b.color === color?.toLowerCase())
+                    b.button.add_style_pseudo_class('checked');
+                else
+                    b.button.remove_style_pseudo_class('checked');
+            }
+        },
+    };
 }
 
 export const HeliosIndicator = GObject.registerClass(
@@ -221,8 +292,43 @@ class HeliosIndicator extends PanelMenu.Button {
         this._profileSection = new PopupMenu.PopupMenuSection();
         this.menu.addMenuItem(this._profileSection);
 
+        this._buildLighting();
+
         this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
         this.menu.addAction('Settings', () => this._ext.openPreferences());
+    }
+
+    /** Keyboard effect, brightness, speed, direction and colour; the lid logo. */
+    _buildLighting() {
+        this._lighting = null;
+        this._lightSection = new PopupMenu.PopupMenuSection();
+        this._lightSection.addMenuItem(new PopupMenu.PopupSeparatorMenuItem('Lighting'));
+
+        this._effectMenu = new PopupMenu.PopupSubMenuMenuItem('Keyboard');
+        this._effectItems = new Map();
+        this._effectKey = '';
+        this._lightSection.addMenuItem(this._effectMenu);
+
+        const keyboard = change => this._setKeyboard(change);
+        this._kbBrightness = makeSliderRow('Brightness', v => keyboard({brightness: v * 100}));
+        this._kbSpeed = makeSliderRow('Speed', v => keyboard({speed: v * 9}));
+        this._kbDirection = new PopupMenu.PopupMenuItem('Direction');
+        this._kbDirection.connect('activate', () => {
+            const current = this._lighting?.keyboard?.direction;
+            keyboard({direction: current === 'left' ? 'right' : 'left'});
+        });
+        this._kbColors = makeSwatchRow(color => keyboard({color}));
+        for (const item of [this._kbBrightness.item, this._kbSpeed.item, this._kbDirection, this._kbColors.item])
+            this._lightSection.addMenuItem(item);
+
+        this._logoSwitch = new PopupMenu.PopupSwitchMenuItem('Lid logo', false);
+        this._logoSwitch.connect('toggled', (_item, on) => this._setLogo({on}));
+        this._logoBrightness = makeSliderRow('Brightness', v => this._setLogo({on: true, brightness: v * 100}));
+        this._logoColors = makeSwatchRow(color => this._setLogo({on: true, color}));
+        for (const item of [this._logoSwitch, this._logoBrightness.item, this._logoColors.item])
+            this._lightSection.addMenuItem(item);
+
+        this.menu.addMenuItem(this._lightSection);
     }
 
     _addSparkline(section, series, row) {
@@ -334,6 +440,7 @@ class HeliosIndicator extends PanelMenu.Button {
             this._statusHint.name.text = message.hint;
             this._statusHint.item.visible = message.hint !== '';
             this._renderProfile({available: false, current: null, choices: []});
+            this._renderLighting({available: false});
             return;
         }
 
@@ -346,6 +453,7 @@ class HeliosIndicator extends PanelMenu.Button {
         this._renderUsage(usage);
         this._renderPower(power);
         this._renderProfile(profile);
+        this._renderLighting(snap.lighting);
         this._renderSegments(snap);
         this._renderSparklines();
     }
@@ -467,6 +575,73 @@ class HeliosIndicator extends PanelMenu.Button {
         // No optimistic update: the dot moves when heliosd reports the change.
         for (const [id, item] of this._profileItems ?? [])
             item.setOrnament(id === state.current ? PopupMenu.Ornament.DOT : PopupMenu.Ornament.NONE);
+    }
+
+    // ---------------------------------------------------------------- lighting
+
+    _renderLighting(lighting) {
+        this._lighting = lighting.available ? lighting : null;
+        this._lightSection.actor.visible = lighting.available;
+        if (!lighting.available)
+            return;
+        const {keyboard, logo, effects} = lighting;
+
+        // No optimistic updates: everything follows what heliosd reports.
+        const key = effects.join(',');
+        if (key !== this._effectKey) {
+            this._effectKey = key;
+            this._effectMenu.menu.removeAll();
+            this._effectItems = new Map();
+            for (const id of effects) {
+                const item = new PopupMenu.PopupMenuItem(effectLabel(id));
+                item.connect('activate', () => this._setKeyboard({effect: id}));
+                this._effectMenu.menu.addMenuItem(item);
+                this._effectItems.set(id, item);
+            }
+        }
+        for (const [id, item] of this._effectItems)
+            item.setOrnament(id === keyboard.effect ? PopupMenu.Ornament.DOT : PopupMenu.Ornament.NONE);
+        this._effectMenu.label.text = `Keyboard: ${effectLabel(keyboard.effect)}`;
+
+        this._kbBrightness.set(keyboard.brightness / 100);
+        this._kbSpeed.set(keyboard.speed / 9);
+        this._kbSpeed.item.visible = effects.includes(keyboard.effect);
+        this._kbDirection.visible = EFFECTS_WITH_DIRECTION.includes(keyboard.effect);
+        this._kbDirection.label.text = `Direction: ${keyboard.direction === 'left' ? 'Left' : 'Right'}`;
+        this._kbColors.item.visible = EFFECTS_WITH_COLOR.includes(keyboard.effect);
+        this._kbColors.select(keyboard.color);
+
+        this._logoSwitch.setToggleState(logo.on);
+        this._logoBrightness.item.visible = logo.on;
+        this._logoBrightness.set(logo.brightness / 100);
+        this._logoColors.item.visible = logo.on;
+        this._logoColors.select(logo.color);
+    }
+
+    async _setKeyboard(change) {
+        const lighting = this._lighting;
+        if (!lighting)
+            return;
+        await this._lightingWrite(() =>
+            this._client.setKeyboardEffect(keyboardRequest(lighting.keyboard, change, lighting.effects)));
+    }
+
+    async _setLogo(change) {
+        const lighting = this._lighting;
+        if (!lighting)
+            return;
+        await this._lightingWrite(() => this._client.setLogo(logoRequest(lighting.logo, change)));
+    }
+
+    async _lightingWrite(call) {
+        try {
+            await call();
+        } catch (e) {
+            if (this._client) {
+                Main.notify('Helios Panel', lightingError(e.name, e.message));
+                this._render(); // put the controls back to what heliosd reports
+            }
+        }
     }
 
     async _setProfile(id) {

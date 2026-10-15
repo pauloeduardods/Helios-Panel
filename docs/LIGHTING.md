@@ -7,7 +7,7 @@
 > and the lid logo work. The **static** keyboard effect (one fixed colour,
 > or four zone colours) leaves the keyboard dark on this machine and is
 > left out until it is understood ([results](#hardware-test-results)). The
-> heliosd interface (step 2) is done; the extension section comes next.
+> heliosd interface (step 2) and the extension section (step 3) are done.
 
 ## Summary
 
@@ -279,10 +279,20 @@ heliosd starts and after a resume.
 
 ## Extension
 
-- **Menu**: a "Lighting" section with the keyboard effect, a brightness
-  slider, colour presets, and a logo on/off switch with its colour.
-- Both appear only when `Capabilities` lists them, and they follow the
-  same daemon-not-running rules as the rest of the panel.
+Done. A "Lighting" section in the menu, shown only when heliosd exports the
+`Lighting` interface:
+
+- **Keyboard**: a submenu with the five effects (the current one marked),
+  then brightness and speed sliders, a direction toggle for the effects that
+  move (wave, shifting) and colour presets for the effects that show a
+  colour (breathing, shifting, zoom).
+- **Lid logo**: an on/off switch, then its brightness and colour presets.
+
+Nothing changes optimistically: the controls follow what heliosd reports
+back. A slider writes once when the user lets go (or per scroll or arrow-key
+step). The arguments are built in `model.js` (`keyboardRequest`,
+`logoRequest`) so they are always in range, and turning the logo on never
+sends brightness 0 or black. Errors show as a notification.
 
 ## Test plan
 
@@ -291,7 +301,7 @@ heliosd starts and after a resume.
 | helios-core (pure) | builds and parses the module's attribute lines; every out-of-range value is rejected before a line is built; exhaustive checks over the full input ranges |
 | kernel module (done) | `make -C kmod/helios-acer-lighting test`, part of `npm test`: the protocol code built in userspace with AddressSanitizer and UBSan against a fake firmware that records every call. It checks the exact bytes for every effect, direction and logo write; every number from 0 to 999 for speed and brightness; about 45 malformed lines that must never reach the firmware, `static` among them; errors stopping a write; the read-back formats; and 200,000 random lines, after each of which every call made must use only methods 4, 12, 13, 20 or 21 with their exact sizes and limits, never the static effect, and the logo target only for the logo's power. CI also builds the module against Ubuntu's generic kernel headers with `W=1` and `-Werror`, and runs `checkpatch.pl --strict`. (KUnit was the original idea; it needs a kernel built for it, which CI cannot do cheaply, so the protocol code is kernel-independent instead.) |
 | heliosd | private-bus integration tests with a fake sysfs tree for the module's files: valid calls write exactly the expected line; invalid ones never reach polkit; polkit denial writes nothing; the interface is absent without the module; state is restored at start |
-| extension | fake proxy: section hidden without capabilities; controls call the right method with the right arguments; error messages |
+| extension (done) | `model.js`: the D-Bus conversion, the request builders (one change on top of the current state, defaults for effects Helios cannot set, clamping, the logo never turned on dark) and the error messages. `client.js` on the fake bus: the snapshot with and without the interface, exact method signatures, error names, no call while heliosd is down |
 | real hardware | the [protocol below](#hardware-test-protocol), run only with you present |
 
 ### Hardware test protocol

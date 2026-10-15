@@ -19,7 +19,7 @@ It was built for the Acer Predator Helios Neo 16 (PHN16-72), but it works on any
 
 - **heliosd**: a small system service. It reads the sensors, publishes them on the system D-Bus and is the only part that changes the platform profile, and only after polkit allows it. It runs sandboxed by systemd, with no capabilities.
 - **heliosctl**: a command-line client (`heliosctl status`).
-- **helios-acer-lighting** (optional, in progress): a small kernel module for the PHN16-72's keyboard RGB, which Linux does not support yet. Helios never installs or loads it; `heliosctl doctor` prints the commands, and [docs/LIGHTING.md](docs/LIGHTING.md) explains them.
+- **helios-acer-lighting** (optional): a small kernel module for the PHN16-72's keyboard RGB effects and lid logo, which Linux does not support yet. Helios never installs or loads it; `heliosctl doctor` prints the commands, and [docs/LIGHTING.md](docs/LIGHTING.md) explains them.
 - **The GNOME extension**: draws what heliosd publishes. It never runs anything as root, never reads `/sys` and never spawns processes. Without heliosd it shows `helios off`.
 
 Details are in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
