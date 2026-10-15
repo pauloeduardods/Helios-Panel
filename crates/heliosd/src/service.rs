@@ -19,16 +19,17 @@ use zbus::{Connection, interface};
 
 use crate::polkit::{self, SET_PROFILE_ACTION};
 use crate::props::{
-    self, Battery, Changes, Cpu, CpuPower, Fan, Gpu, GpuPower, ProfileProps, SensorsProps,
-    Temperature,
+    self, Battery, Changes, Cpu, CpuFrequency, CpuPower, Device, Fan, Gpu, GpuPower, ProfileProps,
+    SensorsProps, Temperature, Usage,
 };
 
 pub const BUS_NAME: &str = "io.github.pauloeduardods.Helios1";
 pub const OBJECT_PATH: &str = "/io/github/pauloeduardods/Helios1";
 pub const SENSORS_IFACE: &str = "io.github.pauloeduardods.Helios1.Sensors";
 pub const PROFILE_IFACE: &str = "io.github.pauloeduardods.Helios1.Profile";
-/// 2 added GpuPower, PowerSource and Battery to Sensors; 3 added CpuPower.
-pub const API_VERSION: u32 = 3;
+/// 2 added GpuPower, PowerSource and Battery to Sensors; 3 added CpuPower;
+/// 4 added CpuUsage, CpuFrequency, GpuUsage and Devices.
+pub const API_VERSION: u32 = 4;
 
 /// Firmware profile switches are not instant; do not hammer the EC.
 const MIN_WRITE_GAP: Duration = Duration::from_millis(250);
@@ -188,6 +189,26 @@ impl SensorsIface {
     #[zbus(property)]
     fn cpu_power(&self) -> CpuPower {
         self.0.sensors().cpu_power
+    }
+
+    #[zbus(property)]
+    fn cpu_usage(&self) -> Usage {
+        self.0.sensors().cpu_usage
+    }
+
+    #[zbus(property)]
+    fn cpu_frequency(&self) -> CpuFrequency {
+        self.0.sensors().cpu_frequency
+    }
+
+    #[zbus(property)]
+    fn gpu_usage(&self) -> Usage {
+        self.0.sensors().gpu_usage
+    }
+
+    #[zbus(property)]
+    fn devices(&self) -> Vec<Device> {
+        self.0.sensors().devices
     }
 
     #[zbus(property)]

@@ -75,7 +75,7 @@ pub struct NvidiaSmi {
 impl NvidiaSmi {
     pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(4);
     const ARGS: [&'static str; 2] = [
-        "--query-gpu=temperature.gpu,power.draw",
+        "--query-gpu=temperature.gpu,power.draw,utilization.gpu",
         "--format=csv,noheader,nounits",
     ];
 
@@ -237,7 +237,9 @@ mod tests {
         let smi = NvidiaSmi::new(script(&dir, "echo \"$@\""), NvidiaSmi::DEFAULT_TIMEOUT);
         assert_eq!(
             smi.query().as_deref(),
-            Some("--query-gpu=temperature.gpu,power.draw --format=csv,noheader,nounits\n")
+            Some(
+                "--query-gpu=temperature.gpu,power.draw,utilization.gpu --format=csv,noheader,nounits\n"
+            )
         );
     }
 

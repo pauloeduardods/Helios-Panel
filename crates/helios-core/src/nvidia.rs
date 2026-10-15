@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! NVIDIA temperature and power draw without defeating runtime power
+//! NVIDIA temperature, power draw and usage without defeating runtime power
 //! management.
 //!
 //! The proprietary driver does not export hwmon temperatures, so the only
@@ -30,15 +30,32 @@ fn parse_number(field: &str) -> Option<f64> {
     field.parse().ok()
 }
 
-/// First line of `nvidia-smi --query-gpu=temperature.gpu,power.draw
-/// --format=csv,noheader,nounits` as (°C, W). Either may be missing: some
-/// GPUs report the draw as `[N/A]`.
-pub fn parse_smi(output: &str) -> (Option<f64>, Option<f64>) {
+/// One nvidia-smi query. Any field may be missing: some GPUs report the
+/// draw as `[N/A]`.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct Smi {
+    pub celsius: Option<f64>,
+    pub watts: Option<f64>,
+    /// Percent of time the GPU was busy over the driver's last sample period.
+    pub usage: Option<f64>,
+}
+
+/// First line of `nvidia-smi --query-gpu=temperature.gpu,power.draw,utilization.gpu
+/// --format=csv,noheader,nounits`.
+pub fn parse_smi(output: &str) -> Smi {
     let line = output.trim().lines().next().unwrap_or_default();
     let mut fields = line.split(',');
     let celsius = fields.next().and_then(parse_number);
     let watts = fields.next().and_then(parse_number).filter(|w| *w >= 0.0);
-    (celsius, watts)
+    let usage = fields
+        .next()
+        .and_then(parse_number)
+        .filter(|u| (0.0..=100.0).contains(u));
+    Smi {
+        celsius,
+        watts,
+        usage,
+    }
 }
 
 /// Every query resets the GPU's runtime-PM idle timer, so the interval is at
@@ -99,6 +116,7 @@ pub struct GpuReading {
     pub state: GpuState,
     pub celsius: Option<f64>,
     pub watts: Option<f64>,
+    pub usage: Option<f64>,
 }
 
 /// The NVIDIA GPU, gated on runtime PM and rate-limited.
@@ -107,8 +125,8 @@ pub struct NvidiaGpu {
     pci_dir: String,
     interval: Duration,
     last_query: Option<Duration>,
-    /// (°C, W) from the last query.
-    last: (Option<f64>, Option<f64>),
+    /// The last query.
+    last: Smi,
 }
 
 impl NvidiaGpu {
@@ -120,7 +138,7 @@ impl NvidiaGpu {
             interval: query_interval(autosuspend),
             pci_dir,
             last_query: None,
-            last: (None, None),
+            last: Smi::default(),
         })
     }
 
@@ -139,11 +157,12 @@ impl NvidiaGpu {
 
     pub fn read(&mut self, fs: &dyn SysFs, gpu: &dyn GpuQuery, clock: &dyn Clock) -> GpuReading {
         if !self.runtime_status(fs).is_awake() {
-            self.last = (None, None);
+            self.last = Smi::default();
             return GpuReading {
                 state: GpuState::Off,
                 celsius: None,
                 watts: None,
+                usage: None,
             };
         }
         let now = clock.now();
@@ -152,12 +171,13 @@ impl NvidiaGpu {
             .is_none_or(|last| now.saturating_sub(last) >= self.interval);
         if due {
             self.last_query = Some(now);
-            self.last = gpu.query().as_deref().map_or((None, None), parse_smi);
+            self.last = gpu.query().as_deref().map(parse_smi).unwrap_or_default();
         }
         GpuReading {
             state: GpuState::On,
-            celsius: self.last.0,
-            watts: self.last.1,
+            celsius: self.last.celsius,
+            watts: self.last.watts,
+            usage: self.last.usage,
         }
     }
 }
@@ -175,6 +195,7 @@ mod tests {
             state: GpuState::Off,
             celsius: None,
             watts: None,
+            usage: None,
         }
     }
 
@@ -183,12 +204,13 @@ mod tests {
             state: GpuState::On,
             celsius,
             watts: None,
+            usage: None,
         }
     }
 
     #[test]
     fn nvidia_smi_output_parsing() {
-        let temp = |s: &str| parse_smi(s).0;
+        let temp = |s: &str| parse_smi(s).celsius;
         assert_eq!(temp("48\n"), Some(48.0));
         assert_eq!(temp("48.5"), Some(48.5));
         assert_eq!(temp("-3"), Some(-3.0));
@@ -201,15 +223,27 @@ mod tests {
     }
 
     #[test]
-    fn nvidia_smi_power_draw_parsing() {
-        assert_eq!(parse_smi("47, 35.20\n"), (Some(47.0), Some(35.2)));
-        assert_eq!(parse_smi("47, [N/A]"), (Some(47.0), None));
-        assert_eq!(parse_smi("47"), (Some(47.0), None), "older output");
-        assert_eq!(parse_smi("[N/A], 12.5"), (None, Some(12.5)));
-        assert_eq!(parse_smi("47, -1"), (Some(47.0), None));
+    fn nvidia_smi_power_draw_and_usage_parsing() {
+        let parse = |s: &str| {
+            let r = parse_smi(s);
+            (r.celsius, r.watts, r.usage)
+        };
         assert_eq!(
-            parse_smi("47, 10\n50, 20"),
-            (Some(47.0), Some(10.0)),
+            parse("52, 5.26, 30\n"),
+            (Some(52.0), Some(5.26), Some(30.0))
+        );
+        assert_eq!(
+            parse("47, 35.20\n"),
+            (Some(47.0), Some(35.2), None),
+            "no usage field"
+        );
+        assert_eq!(parse("47, [N/A], [N/A]"), (Some(47.0), None, None));
+        assert_eq!(parse("47"), (Some(47.0), None, None), "older output");
+        assert_eq!(parse("[N/A], 12.5, 7"), (None, Some(12.5), Some(7.0)));
+        assert_eq!(parse("47, -1, 101"), (Some(47.0), None, None));
+        assert_eq!(
+            parse("47, 10, 5\n50, 20, 90"),
+            (Some(47.0), Some(10.0), Some(5.0)),
             "first GPU"
         );
     }

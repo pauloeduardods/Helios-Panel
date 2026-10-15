@@ -21,6 +21,10 @@ beforeEach(() => {
                 Temperatures: [],
                 GpuPower: [false, 0],
                 CpuPower: [true, 12.3],
+                CpuUsage: [true, 23],
+                CpuFrequency: [true, 1.4, 3.8],
+                GpuUsage: [false, 0],
+                Devices: [['storage', 'CT500P2SSD8', 44.9]],
                 PowerSource: 'ac',
                 Battery: ['BAT1', 'not-charging', 80, 0, 92, 0, -1],
             },
@@ -87,6 +91,8 @@ test('running: properties come from the proxies', async () => {
     assert.equal(snap.power.source, 'ac');
     assert.equal(snap.power.battery.health, 92);
     assert.equal(snap.power.cpuWatts, 12.3);
+    assert.deepEqual(snap.usage, {cpu: 23, gpu: null, averageGhz: 1.4, maxGhz: 3.8});
+    assert.equal(snap.sensors.devices[0].name, 'CT500P2SSD8');
     assert.equal(snap.profile.current, 'balanced');
 });
 

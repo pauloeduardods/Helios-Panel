@@ -89,7 +89,7 @@ export function profileColor(id) {
  * Unpacked D-Bus properties (see docs/ARCHITECTURE.md, API v1) to plain
  * objects. Missing properties give empty values, never exceptions.
  */
-export function sensorsFromDbus({Cpu, Gpu, Fans, Temperatures} = {}) {
+export function sensorsFromDbus({Cpu, Gpu, Fans, Temperatures, Devices} = {}) {
     const [cpuId = '', cpuValid = false, cpuC = 0] = Cpu ?? [];
     const [gpuSource = '', gpuState = 'none', gpuValid = false, gpuC = 0] = Gpu ?? [];
     return {
@@ -97,7 +97,38 @@ export function sensorsFromDbus({Cpu, Gpu, Fans, Temperatures} = {}) {
         gpu: {source: gpuSource || null, state: gpuState, celsius: gpuValid ? gpuC : null},
         fans: (Fans ?? []).map(([label, rpm]) => ({label, rpm: rpm < 0 ? null : rpm})),
         temperatures: (Temperatures ?? []).map(([id, chip, label, celsius]) => ({id, chip, label, celsius})),
+        // Drives and network cards (API v4), already sorted by heliosd.
+        devices: (Devices ?? []).map(([kind, name, celsius]) => ({kind, name, celsius})),
     };
+}
+
+/**
+ * CPU and GPU usage and the CPU clock (API v4); null when unknown or when
+ * heliosd is older.
+ */
+export function usageFromDbus({CpuUsage, CpuFrequency, GpuUsage} = {}) {
+    const [cpuValid = false, cpu = 0] = CpuUsage ?? [];
+    const [freqValid = false, averageGhz = 0, maxGhz = 0] = CpuFrequency ?? [];
+    const [gpuValid = false, gpu = 0] = GpuUsage ?? [];
+    return {
+        cpu: cpuValid ? cpu : null,
+        gpu: gpuValid ? gpu : null,
+        averageGhz: freqValid ? averageGhz : null,
+        maxGhz: freqValid ? maxGhz : null,
+    };
+}
+
+export function formatPercent(percent) {
+    if (percent === null || percent === undefined || !Number.isFinite(percent))
+        return '--';
+    return `${Math.round(percent)}%`;
+}
+
+/** "1.4 GHz · max 3.8 GHz", or null without a reading. */
+export function formatClock(usage) {
+    if (usage.averageGhz === null || usage.maxGhz === null)
+        return null;
+    return `${usage.averageGhz.toFixed(1)} GHz · max ${usage.maxGhz.toFixed(1)} GHz`;
 }
 
 /** -1 (heliosd's "unknown") and garbage become null. */

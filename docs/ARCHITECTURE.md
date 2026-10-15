@@ -66,6 +66,7 @@ crates/
 │   ├── src/hwmon.rs         scan, CPU/AMD GPU/fan resolution, sensor ids
 │   ├── src/nvidia.rs        PCI lookup, runtime-PM gate, query interval
 │   ├── src/power.rs         power source, laptop battery, averaged draw
+│   ├── src/cpu.rs           CPU usage from /proc/stat, clock from cpufreq
 │   ├── src/rapl.rs          CPU package draw from the RAPL counter, 2 s minimum window
 │   ├── src/profile.rs       platform profile state, validation, write path
 │   ├── src/status.rs        Status struct (serde) shared by CLI JSON and daemon
@@ -95,7 +96,7 @@ pub trait SysFs {
     fn write(&self, path: &str, value: &str) -> io::Result<()>; // in place, no temp+rename
 }
 
-/// Runs `nvidia-smi --query-gpu=temperature.gpu,power.draw --format=csv,noheader,nounits`.
+/// Runs `nvidia-smi --query-gpu=temperature.gpu,power.draw,utilization.gpu --format=csv,noheader,nounits`.
 pub trait GpuQuery {
     fn query(&self) -> Option<String>; // stdout; None if it failed or timed out
 }
@@ -182,7 +183,7 @@ All properties are read-only and emit `org.freedesktop.DBus.Properties.Propertie
 | Member | Type | Meaning |
 |---|---|---|
 | `Version` | `s` | heliosd version, e.g. `0.2.0` |
-| `ApiVersion` | `u` | `3`; raised for compatible additions (2 added `GpuPower`, `PowerSource`, `Battery`; 3 added `CpuPower`) |
+| `ApiVersion` | `u` | `4`; raised for compatible additions (2 added `GpuPower`, `PowerSource`, `Battery`; 3 added `CpuPower`; 4 added `CpuUsage`, `CpuFrequency`, `GpuUsage`, `Devices`) |
 
 ### `io.github.pauloeduardods.Helios1.Sensors`
 
@@ -194,6 +195,10 @@ All properties are read-only and emit `org.freedesktop.DBus.Properties.Propertie
 | `Temperatures` | `a(sssd)` | every readable hwmon temperature: (id, chip, label, °C), for clients that let the user pick a sensor; unreadable sensors are left out |
 | `GpuPower` | `(bd)` | (valid, W): NVIDIA board draw, from the same rate-limited `nvidia-smi` query as the temperature |
 | `CpuPower` | `(bd)` | (valid, W): CPU package draw from RAPL, averaged over at least 2 s and rounded to 0.1 W (PLATYPUS, CVE-2020-8694); invalid until the second read and without RAPL |
+| `CpuUsage` | `(bd)` | (valid, %): all CPUs busy since the previous poll, whole percent; invalid until the second poll |
+| `CpuFrequency` | `(bdd)` | (valid, average GHz, max GHz) across the cpufreq policies, rounded to 0.1 |
+| `GpuUsage` | `(bd)` | (valid, %): `utilization.gpu` from the same `nvidia-smi` query (only while awake), or `amdgpu` `gpu_busy_percent` |
+| `Devices` | `a(ssd)` | drives and network cards: (kind `storage`/`wifi`, name, °C), sorted by kind then name; a drive's name is its model, so two `nvme` chips are told apart; unreadable sensors are left out |
 | `PowerSource` | `s` | `ac`, `battery` or `unknown` (no system `Mains` supply and the battery is not discharging) |
 | `Battery` | `(ssdddii)` | (name, state `charging`/`discharging`/`full`/`not-charging`/`unknown`, %, W, health %, cycles, minutes left); name `""` = no battery, `-1` = unknown |
 

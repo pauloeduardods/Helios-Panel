@@ -15,8 +15,9 @@ import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 
 import {HeliosClient} from '../client.js';
 import {
-    Level, batteryStateLabel, daemonMessage, formatDuration, formatRpm, formatTemp, formatWatts,
-    pickCpu, pickGpu, powerPanelText, profileColor, profileLabel, setProfileError, tempLevel,
+    Level, batteryStateLabel, daemonMessage, formatClock, formatDuration, formatPercent, formatRpm,
+    formatTemp, formatWatts, pickCpu, pickGpu, powerPanelText, profileColor, profileLabel,
+    setProfileError, tempLevel,
 } from '../model.js';
 
 function makeSegment(iconPath) {
@@ -52,6 +53,8 @@ class HeliosIndicator extends PanelMenu.Button {
         this._profileMenuKey = '';
         this._fanKey = '';
         this._fanRows = [];
+        this._deviceKey = '';
+        this._deviceRows = [];
 
         this._buildPanel();
         this._buildMenu();
@@ -108,9 +111,22 @@ class HeliosIndicator extends PanelMenu.Button {
         this._rowGpu = makeInfoRow('GPU');
         this._readingsSection.addMenuItem(this._rowCpu.item);
         this._readingsSection.addMenuItem(this._rowGpu.item);
+        this._deviceSection = new PopupMenu.PopupMenuSection();
+        this._readingsSection.addMenuItem(this._deviceSection);
         this._fanSection = new PopupMenu.PopupMenuSection();
         this._readingsSection.addMenuItem(this._fanSection);
         this.menu.addMenuItem(this._readingsSection);
+
+        this._usageSection = new PopupMenu.PopupMenuSection();
+        this._usageSection.addMenuItem(new PopupMenu.PopupSeparatorMenuItem('Usage'));
+        this._usageRows = {
+            cpu: makeInfoRow('CPU'),
+            clock: makeInfoRow('CPU clock'),
+            gpu: makeInfoRow('GPU'),
+        };
+        for (const row of Object.values(this._usageRows))
+            this._usageSection.addMenuItem(row.item);
+        this.menu.addMenuItem(this._usageSection);
 
         this._powerSection = new PopupMenu.PopupMenuSection();
         this._powerSection.addMenuItem(new PopupMenu.PopupSeparatorMenuItem('Power'));
@@ -149,6 +165,7 @@ class HeliosIndicator extends PanelMenu.Button {
         this._statusSeg.icon.visible = icons;
         this._statusSection.actor.visible = message !== null;
         this._readingsSection.actor.visible = message === null;
+        this._usageSection.actor.visible = message === null;
         this._powerSection.actor.visible = message === null;
         if (message) {
             for (const seg of Object.values(this._seg))
@@ -161,10 +178,12 @@ class HeliosIndicator extends PanelMenu.Button {
             return;
         }
 
-        const {sensors, power, profile} = snap;
+        const {sensors, usage, power, profile} = snap;
         this._renderCpu(pickCpu(sensors, this._settings.get_string('cpu-sensor')));
         this._renderGpu(pickGpu(sensors, this._settings.get_string('gpu-sensor')));
+        this._renderDevices(sensors.devices);
         this._renderFans(sensors.fans);
+        this._renderUsage(usage);
         this._renderPower(power);
         this._renderProfile(profile);
     }
@@ -246,6 +265,35 @@ class HeliosIndicator extends PanelMenu.Button {
         fans.forEach((f, i) => {
             this._fanRows[i].value.text = f.rpm === null ? '--' : `${f.rpm} RPM`;
         });
+    }
+
+    /** Drives and the Wi-Fi card, one menu row each; never in the panel. */
+    _renderDevices(devices) {
+        const key = devices.map(d => d.name).join('\n');
+        if (key !== this._deviceKey) {
+            this._deviceKey = key;
+            this._deviceSection.removeAll();
+            this._deviceRows = devices.map(d => {
+                const row = makeInfoRow(d.name);
+                this._deviceSection.addMenuItem(row.item);
+                return row;
+            });
+        }
+        devices.forEach((d, i) => {
+            this._deviceRows[i].value.text = formatTemp(d.celsius, true);
+        });
+    }
+
+    _renderUsage(usage) {
+        const rows = this._usageRows;
+        const show = (row, value) => {
+            row.item.visible = value !== null;
+            row.value.text = value ?? '';
+        };
+        show(rows.cpu, usage.cpu === null ? null : formatPercent(usage.cpu));
+        show(rows.clock, formatClock(usage));
+        show(rows.gpu, usage.gpu === null ? null : formatPercent(usage.gpu));
+        this._usageSection.actor.visible = Object.values(rows).some(r => r.item.visible);
     }
 
     _renderPower(power) {
