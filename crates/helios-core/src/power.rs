@@ -100,13 +100,27 @@ pub fn find_battery(fs: &dyn SysFs) -> Option<String> {
         .find(|dir| supply_type(fs, dir).as_deref() == Some("Battery") && is_system(fs, dir))
 }
 
-/// `Some(online)` from the first system-scoped `Mains` supply.
-pub fn ac_online(fs: &dyn SysFs) -> Option<bool> {
+/// The laptop's own AC adapter: the first system-scoped `Mains` supply.
+pub fn find_mains(fs: &dyn SysFs) -> Option<String> {
     supplies(fs)
         .into_iter()
         .find(|dir| supply_type(fs, dir).as_deref() == Some("Mains") && is_system(fs, dir))
-        .and_then(|dir| read_int(fs, &format!("{dir}/online")))
-        .map(|online| online == 1)
+}
+
+/// `Some(online)` from the first system-scoped `Mains` supply.
+pub fn ac_online(fs: &dyn SysFs) -> Option<bool> {
+    find_mains(fs).and_then(|dir| read_online(fs, &dir))
+}
+
+fn read_online(fs: &dyn SysFs, dir: &str) -> Option<bool> {
+    read_int(fs, &format!("{dir}/online")).map(|online| online == 1)
+}
+
+/// Which supplies are the battery and the AC adapter; found once and kept.
+#[derive(Debug, Clone)]
+struct Supplies {
+    battery: Option<String>,
+    mains: Option<String>,
 }
 
 /// Micro-units (µW, µWh, ...) to the unit.
@@ -149,18 +163,47 @@ fn ratio_percent(part: Option<f64>, whole: Option<f64>) -> Option<f64> {
 pub struct PowerMonitor {
     /// (average watts, when it was last updated)
     average: Option<(f64, Duration)>,
+    supplies: Option<Supplies>,
 }
 
 impl PowerMonitor {
+    /// Finds the battery and the AC adapter again on the next poll.
+    pub fn forget(&mut self) {
+        self.supplies = None;
+    }
+
     pub fn poll(&mut self, fs: &dyn SysFs, clock: &dyn Clock) -> PowerStatus {
-        let battery = find_battery(fs).map(|dir| self.read_battery(fs, &dir, clock));
+        let supplies = self
+            .supplies
+            .get_or_insert_with(|| Supplies {
+                battery: find_battery(fs),
+                mains: find_mains(fs),
+            })
+            .clone();
+        let battery = supplies
+            .battery
+            .as_deref()
+            .map(|dir| self.read_battery(fs, dir, clock));
+        let online = supplies
+            .mains
+            .as_deref()
+            .and_then(|dir| read_online(fs, dir));
+        // A supply that stopped reading (unplugged battery, driver reload):
+        // look again next time.
+        if battery
+            .as_ref()
+            .is_some_and(|b| b.state == BatteryState::Unknown)
+            || (supplies.mains.is_some() && online.is_none())
+        {
+            self.forget();
+        }
         if battery
             .as_ref()
             .is_none_or(|b| b.state != BatteryState::Discharging)
         {
             self.average = None;
         }
-        let source = match (ac_online(fs), &battery) {
+        let source = match (online, &battery) {
             (Some(true), _) => PowerSource::Ac,
             (Some(false), _) => PowerSource::Battery,
             (None, Some(b)) if b.state == BatteryState::Discharging => PowerSource::Battery,
@@ -390,6 +433,30 @@ mod tests {
             Some(86),
             "the new draw is used as is, not blended with the old one"
         );
+    }
+
+    #[test]
+    fn supplies_are_found_once_and_again_when_they_stop_reading() {
+        let fs = FakeFs::new(PHN16_72);
+        let clock = FakeClock::default();
+        let mut monitor = PowerMonitor::default();
+        monitor.poll(&fs, &clock);
+        fs.take_access_log();
+        monitor.poll(&fs, &clock);
+        let (reads, listings) = fs.take_access_log();
+        assert!(listings.is_empty(), "{listings:?}");
+        assert!(
+            !reads.iter().any(|p| p.ends_with("/type")),
+            "a steady poll does not look for the supplies again: {reads:?}"
+        );
+
+        // The battery goes away: it stops reading, and the next poll looks
+        // again and finds none.
+        for attr in ["type", "status", "capacity", "voltage_now", "current_now"] {
+            fs.remove(&format!("{BAT}/{attr}"));
+        }
+        monitor.poll(&fs, &clock);
+        assert_eq!(monitor.poll(&fs, &clock).battery, None);
     }
 
     #[test]

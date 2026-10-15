@@ -192,6 +192,10 @@ pub struct FakeFs {
     unreadable: BTreeSet<String>,
     unwritable: BTreeSet<String>,
     writes: RefCell<Vec<(String, String)>>,
+    /// Every file read and directory listed, in order, for the footprint
+    /// tests.
+    reads: RefCell<Vec<String>>,
+    listings: RefCell<Vec<String>>,
 }
 
 impl FakeFs {
@@ -236,10 +240,22 @@ impl FakeFs {
     pub fn writes(&self) -> Vec<(String, String)> {
         self.writes.borrow().clone()
     }
+
+    /// A file disappears (a driver unloaded, a device unplugged).
+    pub fn remove(&self, path: &str) {
+        self.files.borrow_mut().remove(path);
+    }
+
+    /// Files read and directories listed since the last call, then forgets
+    /// them.
+    pub fn take_access_log(&self) -> (Vec<String>, Vec<String>) {
+        (self.reads.take(), self.listings.take())
+    }
 }
 
 impl SysFs for FakeFs {
     fn read_to_string(&self, path: &str) -> Option<String> {
+        self.reads.borrow_mut().push(path.to_owned());
         if self.unreadable.contains(path) {
             return None;
         }
@@ -247,6 +263,7 @@ impl SysFs for FakeFs {
     }
 
     fn read_dir(&self, path: &str) -> Vec<String> {
+        self.listings.borrow_mut().push(path.to_owned());
         let prefix = format!("{}/", path.trim_end_matches('/'));
         let names: BTreeSet<String> = self
             .files

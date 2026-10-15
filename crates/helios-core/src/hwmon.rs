@@ -206,7 +206,8 @@ pub struct DeviceSensor {
     pub path: String,
 }
 
-fn device_kind(chip: &str) -> Option<DeviceKind> {
+/// The kind of component a chip belongs to, by its name.
+pub fn device_kind(chip: &str) -> Option<DeviceKind> {
     DEVICE_CHIPS.iter().find_map(|(name, kind)| {
         let matches = chip == *name
             || chip

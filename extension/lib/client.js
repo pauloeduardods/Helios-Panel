@@ -160,8 +160,16 @@ export class HeliosClient {
         return this._state;
     }
 
-    /** Everything heliosd currently publishes, as plain objects. */
+    /**
+     * Everything heliosd currently publishes, as plain objects. Built once
+     * per change and shared, so callers must not modify it.
+     */
     snapshot() {
+        this._snapshot ??= this._buildSnapshot();
+        return this._snapshot;
+    }
+
+    _buildSnapshot() {
         const p = this._proxies;
         return {
             state: this._state,
@@ -246,6 +254,7 @@ export class HeliosClient {
             this._proxies = Object.fromEntries(entries);
             for (const [key, proxy] of Object.entries(this._proxies)) {
                 const id = proxy.connect('g-properties-changed', () => {
+                    this._snapshot = null;
                     if (key === 'sensors' && this._keepHistory)
                         this._history.push(now(), historySample(this.snapshot()));
                     this._onChange();
@@ -274,6 +283,7 @@ export class HeliosClient {
 
     _setState(state) {
         this._state = state;
+        this._snapshot = null;
         this._onChange();
     }
 
@@ -282,6 +292,7 @@ export class HeliosClient {
             proxy.disconnect(id);
         this._signalIds = [];
         this._proxies = null;
+        this._snapshot = null;
     }
 
     destroy() {

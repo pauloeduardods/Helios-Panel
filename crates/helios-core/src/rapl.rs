@@ -44,15 +44,14 @@ fn packages(fs: &dyn SysFs) -> Vec<String> {
 }
 
 /// One read of every package counter: (directory, µJ).
-fn sample(fs: &dyn SysFs) -> Option<Vec<(String, u64)>> {
-    let dirs = packages(fs);
+fn sample(fs: &dyn SysFs, dirs: &[String]) -> Option<Vec<(String, u64)>> {
     if dirs.is_empty() {
         return None;
     }
-    dirs.into_iter()
+    dirs.iter()
         .map(|dir| {
             let uj = u64::try_from(read_int(fs, &format!("{dir}/energy_uj"))?).ok()?;
-            Some((dir, uj))
+            Some((dir.clone(), uj))
         })
         .collect()
 }
@@ -77,9 +76,16 @@ struct Baseline {
 pub struct CpuPowerMeter {
     baseline: Option<Baseline>,
     watts: Option<f64>,
+    /// The package directories, found once.
+    packages: Option<Vec<String>>,
 }
 
 impl CpuPowerMeter {
+    /// Looks for the package domains again on the next read.
+    pub fn forget(&mut self) {
+        self.packages = None;
+    }
+
     /// The package draw in W, or `None` when there is no RAPL, it cannot be
     /// read (not root), or this is the first read. Reads closer together
     /// than [`WINDOW`] return the previous value without touching the
@@ -91,7 +97,8 @@ impl CpuPowerMeter {
                 return self.watts;
             }
         }
-        let Some(energy) = sample(fs) else {
+        let dirs = self.packages.get_or_insert_with(|| packages(fs));
+        let Some(energy) = sample(fs, dirs) else {
             self.baseline = None;
             self.watts = None;
             return None;
