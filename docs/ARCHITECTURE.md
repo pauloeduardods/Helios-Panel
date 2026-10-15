@@ -352,9 +352,12 @@ extension.js     lifecycle
 prefs.js         settings; reads heliosd once (sensor list, diagnostics)
 lib/
 ├── client.js    HeliosClient: Gio.bus_watch_name + Gio.DBusProxy on the system bus
-├── model.js     D-Bus values → view, temperature levels, labels, colors (pure)
+├── model.js     D-Bus values → view, temperature levels, labels, colors, graphs (pure)
+├── layout.js    the top-bar layout: parse, migrate, presets, templates → markup (pure)
 ├── alerts.js    alert and profile-on-AC decisions: snapshot + time → actions (pure)
-├── prefs/alerts.js  the "Alerts" preferences page
+├── draw.js      paints line, area and bar graphs on a Cairo context
+├── prefs/layoutPage.js   Settings → Layout (editor, live preview, import/export)
+├── prefs/alerts.js       Settings → Alerts
 └── ui/
     ├── indicator.js
     └── alerts.js    HeliosAlerts: its own HeliosClient (no history) → AlertEngine
@@ -381,15 +384,65 @@ lib/
 - `SetProfile` is called asynchronously with a long timeout, because polkit may
   prompt. `NotAuthorized` / `InvalidArgument` / `WriteFailed` show a
   notification. No optimistic UI: the check mark moves when `Active` changes.
-- The settings that stay are display only: what to show, colors, thresholds,
-  position, profile-name style, and the user's sensor choice (picked from
-  `Temperatures`).
+- The settings that stay are display only: the layout (below), colors,
+  thresholds, position, profile-name style, and the user's sensor choice
+  (picked from `Temperatures`).
 - The settings that go away, because the daemon now owns them:
   `allow-wake-dgpu`, `gpu-min-interval`, `refresh-interval`.
 - `lib/core`, `lib/sys`, `lib/backends`, the power-profiles-daemon path and
   `extras/99-helios-platform-profile.rules` were deleted in task 4. The udev
   rule only existed to let the extension write the profile itself. Their logic
   and tests live on in helios-core.
+
+### Top-bar layout
+
+The `panel-layout` setting holds what the top bar shows, as JSON. The
+indicator and the preview in Settings both render it with `lib/layout.js`,
+so the preview matches the bar.
+
+```json
+{
+  "version": 1,
+  "segments": [
+    {"items": ["cpu", "gpu"], "template": "{cpu}°/{gpu}°", "icon": "auto", "graph": null},
+    {"items": ["cpu-usage"], "template": "", "icon": "none",
+     "graph": {"reading": "cpu-usage", "kind": "bars", "only": false,
+               "width": "narrow", "window": 120, "color": "follow"}}
+  ]
+}
+```
+
+- `items`: readings (`cpu`, `gpu`, `cpu-usage`, `gpu-usage`, `cpu-watts`,
+  `gpu-watts`, `fan`, `power`, `watts`, `battery`, `time-left`, `profile`,
+  `clock`, `clock-max`). When a segment has a template, its items are the
+  readings the template uses.
+- `template`: `{name}` or `{name:N}` (N decimals, 0–2); `{{` and `}}` are
+  literal braces; `{fan1}`, `{fan2}`… are single fans. Empty means the items'
+  own templates joined by ` · `, leaving out readings the machine lacks.
+- `icon`: `auto` (the first reading's), `none`, or `cpu`, `gpu`, `fan`,
+  `power`, `profile`.
+- `graph`: `null` or one reading with a history (`cpu`, `gpu`, `cpu-usage`,
+  `gpu-usage`, `cpu-watts`, `power`, `watts`), `kind` `line`/`area`/`bars`,
+  `only` (hide the text), `width` `narrow`/`medium`/`wide`, `window` 60–300 s,
+  `color` `follow` (temperature colors) or a color.
+
+Each reading in a segment gets its own color in Pango markup: temperatures
+by threshold (bold when hot if chosen), the profile by power level. Thresholds,
+colors, `hide-gpu-when-off`, `profile-names` and `color-profile` stay separate
+keys, shared with the menu.
+
+**Fallbacks.** Nothing in the layout can break the bar. An unknown
+placeholder or an unclosed `{` renders `--` for that part; text is capped at
+120 characters. Unknown readings, bad graph values and empty segments are
+dropped; at most 12 segments of 8 readings. Text that is not a layout at all
+gives the default layout (CPU, GPU, profile).
+
+**Migration.** `panel-layout` starts empty. The first time the extension or
+Settings runs, it builds the layout from the part-1 keys (`show-*`,
+`show-icons`, `show-unit`, `panel-order`, `graph-*`): one segment per shown
+item, in their order, with their icons, `°C` templates and graphs, and stores
+it. After that the old keys are never read; they stay in the schema only for
+this step.
 
 ## Test strategy
 
@@ -402,7 +455,7 @@ Every rule in this section is enforced in CI (`checks` job).
 | profile writes | `FakeFs` with a write log | a value in `choices` is written to the right path and read back; values not in `choices`, empty, whitespace, newline-injected or over-long strings are rejected with **no write** |
 | heliosd | `cargo test -p heliosd --test bus`: each test starts its own `dbus-daemon` with a private config and runs the daemon there, `--sysfs-root` temp tree, fake `nvidia-smi` script that counts calls, fake polkit service on the same bus that answers allow/deny | properties match the tree; `PropertiesChanged` on change; `SetProfile` accepts only `Choices`; invalid values never reach polkit; polkit denial or a missing polkit → `NotAuthorized` and the tree is byte-for-byte unchanged; suspended GPU → fake `nvidia-smi` never ran; external profile changes are published |
 | heliosctl | run the binary against fixture trees | `status --json` matches the schema; `doctor` writes nothing (tree hashed before/after) |
-| extension | `npm test` with gi stubs, including a fake `Gio.DBusProxy` and `bus_watch_name` | rendering from properties; **daemon not running** state; recovery when the name appears; errors from `SetProfile` |
+| extension | `npm test` with gi stubs, including a fake `Gio.DBusProxy` and `bus_watch_name` | rendering from properties; **daemon not running** state; recovery when the name appears; errors from `SetProfile`; the layout engine (`tests/layout.test.js`): templates, fallbacks to `--` and to the default layout, migration of the old settings, presets, editing, bar graphs |
 | lint | `cargo clippy --workspace --all-targets -- -D warnings`, `npm run check` | |
 
 No test ever touches the real `/sys`, the real system bus or the real polkit.

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// The top-bar button: compact readings in the panel, details and the profile
-// switcher in its menu. Everything comes from heliosd through HeliosClient;
-// this file only renders. It has no timers: it redraws when heliosd reports
+// The top-bar button: the segments of the user's layout in the panel (see
+// lib/layout.js), details and the profile switcher in its menu. Everything
+// comes from heliosd through HeliosClient; this file only renders. It has no timers: it redraws when heliosd reports
 // a change or a setting changes. The graphs draw the history HeliosClient
 // keeps, so they cost no extra D-Bus calls.
 
@@ -15,31 +15,22 @@ import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
 import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 
 import {HeliosClient} from '../client.js';
+import {paintBars, paintPieces} from '../draw.js';
 import {
-    GRAPH_WIDTHS, Level, PANEL_ITEMS, batteryStateLabel, daemonMessage, formatClock,
-    formatDuration, formatPercent, formatRpm, formatTemp, formatWatts, normalizeOrder, parseColor,
-    pickCpu, pickGpu, powerPanelText, profileColor, profileLabel, setProfileError, sparklinePieces,
-    tempLevel,
+    loadLayout, readOptions, readStyle, renderLayout, segmentColor, segmentMarkup, serializeLayout,
+    seriesLevelOf,
+} from '../layout.js';
+import {
+    Level, barPieces, batteryStateLabel, daemonMessage, formatClock, formatDuration, formatPercent,
+    formatTemp, formatWatts, parseColor, pickCpu, pickGpu, profileLabel, setProfileError,
+    sparklinePieces, tempLevel,
 } from '../model.js';
 
-/** Which icon each top-bar item uses. */
-const ITEM_ICONS = Object.freeze({
-    'cpu': 'cpu', 'gpu': 'gpu', 'cpu-usage': 'cpu', 'gpu-usage': 'gpu',
-    'fan': 'fan', 'power': 'power', 'profile': 'profile',
-});
-
-/** Temperature series and their threshold settings. */
-const TEMP_THRESHOLDS = Object.freeze({
-    'cpu-celsius': ['cpu-warm', 'cpu-hot'],
-    'gpu-celsius': ['gpu-warm', 'gpu-hot'],
-});
-
-function makeSegment(iconPath) {
+function makeSegment(iconPath = null) {
     const box = new St.BoxLayout({style_class: 'helios-segment', y_align: Clutter.ActorAlign.CENTER});
-    const icon = new St.Icon({
-        gicon: Gio.icon_new_for_string(iconPath),
-        style_class: 'system-status-icon helios-icon',
-    });
+    const icon = new St.Icon({style_class: 'system-status-icon helios-icon'});
+    if (iconPath)
+        icon.gicon = Gio.icon_new_for_string(iconPath);
     const label = new St.Label({text: '--', y_align: Clutter.ActorAlign.CENTER});
     const graph = new St.DrawingArea({
         style_class: 'helios-bar-graph', y_align: Clutter.ActorAlign.CENTER, visible: false,
@@ -47,41 +38,21 @@ function makeSegment(iconPath) {
     box.add_child(icon);
     box.add_child(label);
     box.add_child(graph);
-    return {box, icon, label, graph};
+    return {box, icon, label, graph, iconName: null, spec: null};
 }
 
-/**
- * Draws sparkline pieces on a DrawingArea. `rgbOf(level)` gives a piece's
- * color as [r, g, b] (0–1); `area` fills under the line.
- */
-function drawPieces(area, pieces, rgbOf, {fill = false, alpha = 1} = {}) {
+/** Draws sparkline pieces on a DrawingArea (see paintPieces). */
+function drawPieces(area, pieces, rgbOf, options = {}) {
     const cr = area.get_context();
     const [, height] = area.get_surface_size();
-    cr.setLineWidth(1.5);
-    for (const {points, level} of pieces) {
-        const [r, g, b] = rgbOf(level);
-        const [[x0, y0], ...rest] = points;
-        if (rest.length === 0) {
-            cr.setSourceRGBA(r, g, b, alpha);
-            cr.rectangle(x0 - 1, y0 - 1, 2, 2); // a lone reading between gaps
-            cr.fill();
-            continue;
-        }
-        if (fill) {
-            cr.setSourceRGBA(r, g, b, alpha * 0.35);
-            cr.moveTo(x0, height);
-            for (const [x, y] of points)
-                cr.lineTo(x, y);
-            cr.lineTo(points[points.length - 1][0], height);
-            cr.closePath();
-            cr.fill();
-        }
-        cr.setSourceRGBA(r, g, b, alpha);
-        cr.moveTo(x0, y0);
-        for (const [x, y] of rest)
-            cr.lineTo(x, y);
-        cr.stroke();
-    }
+    paintPieces(cr, height, pieces, rgbOf, options);
+    cr.$dispose();
+}
+
+/** Draws bars from barPieces on a DrawingArea. */
+function drawBars(area, bars, rgbOf) {
+    const cr = area.get_context();
+    paintBars(cr, bars, rgbOf);
     cr.$dispose();
 }
 
@@ -132,8 +103,8 @@ class HeliosIndicator extends PanelMenu.Button {
         this._settingsId = this._settings.connect('changed', (_s, key) => {
             if (key === 'profile-names')
                 this._profileMenuKey = '';
-            if (key === 'panel-order')
-                this._applyOrder();
+            if (key === 'panel-layout')
+                this._loadLayout();
             this._render();
         });
         // Not named _onDestroy: PanelMenu.ButtonBox already connects 'destroy' to
@@ -146,30 +117,44 @@ class HeliosIndicator extends PanelMenu.Button {
 
     // ---------------------------------------------------------------- build
 
+    _iconPath(name) {
+        return `${this._ext.path}/icons/${name}-symbolic.svg`;
+    }
+
     _buildPanel() {
         this._box = new St.BoxLayout({style_class: 'panel-status-menu-box helios-panel-box'});
         this.add_child(this._box);
-        const icon = name => `${this._ext.path}/icons/${name}-symbolic.svg`;
-        this._seg = {};
-        for (const item of PANEL_ITEMS) {
-            const seg = makeSegment(icon(ITEM_ICONS[item.id]));
-            if (item.series)
-                seg.graph.connect('repaint', () => this._drawBarGraph(item, seg));
-            this._seg[item.id] = seg;
-        }
+        this._segs = [];
+        this._layoutKey = null;
 
         // Shown instead of the readings while heliosd is unavailable.
-        this._statusSeg = makeSegment(icon('cpu'));
+        this._statusSeg = makeSegment(this._iconPath('cpu'));
         this._statusSeg.box.opacity = 128;
-        this._applyOrder();
+        this._box.add_child(this._statusSeg.box);
+        this._loadLayout();
     }
 
-    /** Puts the segments in the order from Settings. */
-    _applyOrder() {
-        this._box.remove_all_children();
-        for (const id of normalizeOrder(this._settings.get_strv('panel-order')))
-            this._box.add_child(this._seg[id].box);
-        this._box.add_child(this._statusSeg.box);
+    /**
+     * Reads the layout and builds one segment per entry. The first run
+     * migrates the older settings into panel-layout, once.
+     */
+    _loadLayout() {
+        const {layout, migrated} = loadLayout(this._settings);
+        if (migrated !== null)
+            this._settings.set_string('panel-layout', migrated);
+        const key = serializeLayout(layout);
+        if (key === this._layoutKey)
+            return;
+        this._layoutKey = key;
+        this._layout = layout;
+        for (const seg of this._segs)
+            seg.box.destroy();
+        this._segs = layout.segments.map(() => {
+            const seg = makeSegment();
+            seg.graph.connect('repaint', () => this._drawBarGraph(seg));
+            this._box.insert_child_below(seg.box, this._statusSeg.box);
+            return seg;
+        });
     }
 
     _buildMenu() {
@@ -245,7 +230,7 @@ class HeliosIndicator extends PanelMenu.Button {
             const [width, height] = area.get_surface_size();
             const pieces = sparklinePieces(this._history, series, width, height,
                 {levelOf: this._levelOf(series)});
-            drawPieces(area, pieces, level => this._rgbFor(area, level, true), {alpha: 0.8});
+            drawPieces(area, pieces, level => this._rgbFor(area, level), {alpha: 0.8});
         });
         spark.item.visible = false;
         section.addMenuItem(spark.item);
@@ -256,24 +241,17 @@ class HeliosIndicator extends PanelMenu.Button {
 
     /** Temperatures get a level per value (their colors); the rest stay normal. */
     _levelOf(series) {
-        const keys = TEMP_THRESHOLDS[series];
-        if (!keys)
-            return () => Level.NORMAL;
-        const [warm, hot] = keys.map(k => this._settings.get_int(k));
-        return v => tempLevel(v, warm, hot);
+        return seriesLevelOf(series, readOptions(this._settings));
     }
 
     /**
-     * A graph color as [r, g, b]: the fixed graph color when chosen (bar
-     * graphs only), else the temperature color for the level, else the
-     * theme's text color.
+     * A graph color as [r, g, b]: the segment's fixed color when it has one,
+     * else the temperature color for the level, else the theme's text color.
      */
-    _rgbFor(area, level, inMenu) {
-        if (!inMenu && this._settings.get_string('graph-color-mode') === 'fixed') {
-            const fixed = parseColor(this._settings.get_string('graph-color'));
-            if (fixed)
-                return fixed;
-        }
+    _rgbFor(area, level, color = 'follow') {
+        const fixed = color === 'follow' ? null : parseColor(color);
+        if (fixed)
+            return fixed;
         const rgb = parseColor(this._colorFor(level));
         if (rgb)
             return rgb;
@@ -281,33 +259,47 @@ class HeliosIndicator extends PanelMenu.Button {
         return [c.red / 255, c.green / 255, c.blue / 255];
     }
 
-    _drawBarGraph(item, seg) {
+    /** A segment's graph: a line, a filled area or bars. */
+    _drawBarGraph(seg) {
+        const spec = seg.spec;
+        if (!spec)
+            return;
         const [width, height] = seg.graph.get_surface_size();
-        const pieces = sparklinePieces(this._history, item.series, width, height, {
-            windowS: this._settings.get_int('graph-window'),
-            levelOf: this._levelOf(item.series),
-        });
-        drawPieces(seg.graph, pieces, level => this._rgbFor(seg.graph, level, false),
-            {fill: this._settings.get_string('graph-style') === 'area'});
+        const options = {windowS: spec.window, levelOf: spec.levelOf};
+        const rgbOf = level => this._rgbFor(seg.graph, level, spec.color);
+        if (spec.kind === 'bars')
+            drawBars(seg.graph, barPieces(this._history, spec.series, width, height, options), rgbOf);
+        else
+            drawPieces(seg.graph, sparklinePieces(this._history, spec.series, width, height, options), rgbOf,
+                {fill: spec.kind === 'area'});
     }
 
-    /** Shows, sizes and redraws the graphs in the top bar. */
-    _renderBarGraphs() {
-        const graphs = this._settings.get_strv('graph-items');
-        const only = this._settings.get_strv('graph-only');
-        const width = GRAPH_WIDTHS[this._settings.get_string('graph-width')] ?? GRAPH_WIDTHS.medium;
-        for (const item of PANEL_ITEMS) {
-            if (!item.series)
-                continue;
-            const seg = this._seg[item.id];
-            const on = graphs.includes(item.id);
-            seg.graph.visible = on;
-            seg.label.visible = !(on && only.includes(item.id));
-            if (on) {
-                seg.graph.set_width(width);
+    /** Draws every segment of the layout from the snapshot. */
+    _renderSegments(snap) {
+        const rendered = renderLayout(this._layout, snap, readOptions(this._settings));
+        const style = readStyle(this._settings);
+        rendered.forEach((r, i) => {
+            const seg = this._segs[i];
+            seg.box.visible = r.visible;
+            if (!r.visible)
+                return;
+            seg.box.opacity = r.dim ? 128 : 255;
+            if (r.icon !== seg.iconName) {
+                seg.iconName = r.icon;
+                seg.icon.gicon = r.icon ? Gio.icon_new_for_string(this._iconPath(r.icon)) : null;
+            }
+            seg.icon.visible = r.icon !== null;
+            const color = segmentColor(r, style);
+            seg.icon.set_style(color ? `color: ${color};` : null);
+            seg.label.visible = r.showText;
+            seg.label.clutter_text.set_markup(segmentMarkup(r, style));
+            seg.spec = r.graph;
+            seg.graph.visible = r.graph !== null;
+            if (r.graph) {
+                seg.graph.set_width(r.graph.width);
                 seg.graph.queue_repaint();
             }
-        }
+        });
     }
 
     /** A menu graph shows under its row once it has two readings to join. */
@@ -328,16 +320,14 @@ class HeliosIndicator extends PanelMenu.Button {
             return;
         const snap = this._client.snapshot();
         const message = daemonMessage(snap.state);
-        const icons = this._settings.get_boolean('show-icons');
 
         this._statusSeg.box.visible = message !== null;
-        this._statusSeg.icon.visible = icons;
         this._statusSection.actor.visible = message !== null;
         this._readingsSection.actor.visible = message === null;
         this._usageSection.actor.visible = message === null;
         this._powerSection.actor.visible = message === null;
         if (message) {
-            for (const seg of Object.values(this._seg))
+            for (const seg of this._segs)
                 seg.box.visible = false;
             this._statusSeg.label.text = message.panel;
             this._statusRow.name.text = message.menu;
@@ -356,7 +346,7 @@ class HeliosIndicator extends PanelMenu.Button {
         this._renderUsage(usage);
         this._renderPower(power);
         this._renderProfile(profile);
-        this._renderBarGraphs();
+        this._renderSegments(snap);
         this._renderSparklines();
     }
 
@@ -368,55 +358,26 @@ class HeliosIndicator extends PanelMenu.Button {
         return this._settings.get_string('color-normal') || null;
     }
 
-    _paint(seg, color, hot) {
-        seg.box.set_style(color ? `color: ${color};` : null);
-        if (hot && this._settings.get_boolean('bold-when-hot'))
-            seg.box.add_style_class_name('helios-hot');
-        else
-            seg.box.remove_style_class_name('helios-hot');
-    }
-
-    _renderTemp(seg, row, celsius, warmKey, hotKey) {
+    _renderTemp(row, celsius, warmKey, hotKey) {
         const level = tempLevel(celsius, this._settings.get_int(warmKey), this._settings.get_int(hotKey));
         const color = this._colorFor(level);
-        seg.label.text = formatTemp(celsius, this._settings.get_boolean('show-unit'));
-        seg.box.opacity = 255;
-        this._paint(seg, color, level === Level.HOT);
         row.value.text = formatTemp(celsius, true);
         row.value.set_style(color ? `color: ${color};` : null);
     }
 
     _renderCpu(celsius) {
-        const seg = this._seg.cpu;
-        seg.icon.visible = this._settings.get_boolean('show-icons');
-        seg.box.visible = this._settings.get_boolean('show-cpu');
-        this._renderTemp(seg, this._rowCpu, celsius, 'cpu-warm', 'cpu-hot');
+        this._renderTemp(this._rowCpu, celsius, 'cpu-warm', 'cpu-hot');
         if (celsius === null)
             this._rowCpu.value.text = 'sensor not found';
     }
 
     _renderGpu({state, celsius}) {
-        const seg = this._seg.gpu;
-        seg.icon.visible = this._settings.get_boolean('show-icons');
-        const wanted = this._settings.get_boolean('show-gpu');
-
-        if (state === 'none') {
-            seg.box.visible = false;
-            this._rowGpu.value.text = 'not found';
+        if (state === 'none' || state === 'off') {
+            this._rowGpu.value.text = state === 'none' ? 'not found' : 'off (power saving)';
             this._rowGpu.value.set_style(null);
             return;
         }
-        if (state === 'off') {
-            seg.box.visible = wanted && !this._settings.get_boolean('hide-gpu-when-off');
-            seg.label.text = 'off';
-            seg.box.opacity = 128;
-            this._paint(seg, null, false);
-            this._rowGpu.value.text = 'off (power saving)';
-            this._rowGpu.value.set_style(null);
-            return;
-        }
-        seg.box.visible = wanted;
-        this._renderTemp(seg, this._rowGpu, celsius, 'gpu-warm', 'gpu-hot');
+        this._renderTemp(this._rowGpu, celsius, 'gpu-warm', 'gpu-hot');
     }
 
     _renderFans(fans) {
@@ -430,10 +391,6 @@ class HeliosIndicator extends PanelMenu.Button {
                 return row;
             });
         }
-        const seg = this._seg.fan;
-        seg.icon.visible = this._settings.get_boolean('show-icons');
-        seg.box.visible = this._settings.get_boolean('show-fans') && fans.length > 0;
-        seg.label.text = fans.map(f => formatRpm(f.rpm)).join('/');
         fans.forEach((f, i) => {
             this._fanRows[i].value.text = f.rpm === null ? '--' : `${f.rpm} RPM`;
         });
@@ -457,14 +414,6 @@ class HeliosIndicator extends PanelMenu.Button {
     }
 
     _renderUsage(usage) {
-        const icons = this._settings.get_boolean('show-icons');
-        for (const [id, value] of [['cpu-usage', usage.cpu], ['gpu-usage', usage.gpu]]) {
-            const seg = this._seg[id];
-            seg.icon.visible = icons;
-            seg.box.visible = this._settings.get_boolean(`show-${id}`) && value !== null;
-            seg.label.text = formatPercent(value);
-        }
-
         const rows = this._usageRows;
         const show = (row, value) => {
             row.item.visible = value !== null;
@@ -477,14 +426,6 @@ class HeliosIndicator extends PanelMenu.Button {
     }
 
     _renderPower(power) {
-        const seg = this._seg.power;
-        const text = powerPanelText(power);
-        seg.icon.visible = this._settings.get_boolean('show-icons');
-        seg.box.visible = this._settings.get_boolean('show-power') && text !== null;
-        seg.label.text = text ?? '';
-        // Dimmed on AC: the draw is only known on battery.
-        seg.box.opacity = power.source === 'battery' ? 255 : 128;
-
         const battery = power.battery;
         const discharging = battery?.state === 'discharging';
         const rows = this._powerRows;
@@ -507,13 +448,7 @@ class HeliosIndicator extends PanelMenu.Button {
     }
 
     _renderProfile(state) {
-        const seg = this._seg.profile;
         const style = this._settings.get_string('profile-names');
-        seg.icon.visible = this._settings.get_boolean('show-icons');
-        seg.box.visible = this._settings.get_boolean('show-profile') && state.available;
-        seg.label.text = profileLabel(state.current, style);
-        const color = this._settings.get_boolean('color-profile') ? profileColor(state.current) : null;
-        seg.box.set_style(color ? `color: ${color};` : null);
 
         this._profileHeader.visible = state.available;
         const choices = state.available ? state.choices : [];

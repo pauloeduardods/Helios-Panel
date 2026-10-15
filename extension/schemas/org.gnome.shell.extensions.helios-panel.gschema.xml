@@ -2,7 +2,10 @@
 <schemalist>
   <schema id="org.gnome.shell.extensions.helios-panel" path="/org/gnome/shell/extensions/helios-panel/">
 
-    <!-- What the top bar shows -->
+    <!-- What the top bar showed before panel-layout. The show-* keys of the
+         readings, show-icons, show-unit, panel-order and graph-* are only
+         read once, to migrate them into panel-layout. hide-gpu-when-off,
+         profile-names and color-profile are still used. -->
     <key name="show-cpu" type="b"><default>true</default><summary>Show CPU temperature</summary></key>
     <key name="show-gpu" type="b"><default>true</default><summary>Show GPU temperature</summary></key>
     <key name="show-fans" type="b"><default>false</default><summary>Show fan speed</summary></key>
@@ -47,6 +50,16 @@
       <summary>Graph color: follow the temperature colors, or one fixed color</summary>
     </key>
     <key name="graph-color" type="s"><default>'#62a0ea'</default><summary>Fixed graph color</summary></key>
+
+    <!-- The top-bar layout: segments, templates and graphs, as JSON (see
+         lib/layout.js and docs/ARCHITECTURE.md). Empty until the first run,
+         which fills it once from the show-*, show-icons, show-unit,
+         panel-order and graph-* keys above; those are not read after that. -->
+    <key name="panel-layout" type="s">
+      <default>''</default>
+      <summary>Top-bar layout (JSON)</summary>
+      <description>Segments the top bar shows, each with its readings, template, icon and graph. Empty means: build it once from the older settings.</description>
+    </key>
 
     <!-- Placement -->
     <key name="panel-position" type="s">
