@@ -23,6 +23,8 @@ pub type GpuPower = (bool, f64);
 pub type CpuPower = (bool, f64);
 /// (valid, %)
 pub type Usage = (bool, f64);
+/// (valid, %, used GiB, total GiB)
+pub type Memory = (bool, f64, f64, f64);
 /// (valid, average GHz, max GHz)
 pub type CpuFrequency = (bool, f64, f64);
 /// (kind, name, °C); unreadable sensors are left out
@@ -62,6 +64,7 @@ pub struct SensorsProps {
     pub cpu_usage: Usage,
     pub cpu_frequency: CpuFrequency,
     pub gpu_usage: Usage,
+    pub memory: Memory,
     pub devices: Vec<Device>,
     pub power_source: String,
     pub battery: Battery,
@@ -172,6 +175,14 @@ impl From<&Status> for SensorsProps {
                 _ => (false, 0.0, 0.0),
             },
             gpu_usage: reading(s.gpu.usage_percent),
+            memory: match (
+                s.memory.usage_percent,
+                s.memory.used_gib,
+                s.memory.total_gib,
+            ) {
+                (Some(percent), Some(used), Some(total)) => (true, percent, used, total),
+                _ => (false, 0.0, 0.0, 0.0),
+            },
             devices: s
                 .devices
                 .iter()
@@ -232,6 +243,9 @@ pub fn sensors_changes(old: &SensorsProps, new: &SensorsProps) -> Changes {
     if old.gpu_usage != new.gpu_usage {
         out.push(("GpuUsage", Value::from(new.gpu_usage)));
     }
+    if old.memory != new.memory {
+        out.push(("Memory", Value::from(new.memory)));
+    }
     if old.devices != new.devices {
         out.push(("Devices", Value::from(new.devices.clone())));
     }
@@ -291,6 +305,7 @@ mod tests {
         assert_eq!(sensors.cpu_usage, (false, 0.0), "first poll: no value yet");
         assert_eq!(sensors.cpu_frequency, (true, 2.1, 4.8));
         assert_eq!(sensors.gpu_usage, (false, 0.0));
+        assert_eq!(sensors.memory, (true, 40.0, 12.4, 31.1));
         assert_eq!(
             sensors.devices,
             [
@@ -358,6 +373,7 @@ mod tests {
     fn no_battery_uses_sentinels() {
         let fs = FakeFs::new(helios_core::fake::AMD_DESKTOP);
         let sensors = SensorsProps::from(&status(&fs));
+        assert_eq!(sensors.memory, (false, 0.0, 0.0, 0.0), "no /proc/meminfo");
         assert_eq!(sensors.power_source, "unknown");
         assert_eq!(
             sensors.battery,
@@ -421,7 +437,7 @@ mod tests {
         clock.advance(2);
         let (ages, series) = history_reply(&history.snapshot(clock.now()));
         assert_eq!(ages, [2.0]);
-        assert_eq!(series.len(), 6);
+        assert_eq!(series.len(), 7);
         assert_eq!(series[0], ("cpu-celsius".into(), vec![true], vec![61.0]));
         assert_eq!(series[1], ("gpu-celsius".into(), vec![false], vec![0.0]));
     }

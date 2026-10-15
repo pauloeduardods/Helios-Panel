@@ -21,7 +21,7 @@ export const LAYOUT_VERSION = 1;
 export const GRAPH_KINDS = Object.freeze(['line', 'area', 'bars']);
 
 /** Icons a segment can show ('auto' = its first reading's, 'none' = no icon). */
-export const ICONS = Object.freeze(['cpu', 'gpu', 'fan', 'power', 'profile']);
+export const ICONS = Object.freeze(['cpu', 'gpu', 'memory', 'fan', 'power', 'profile']);
 
 /** The longest template kept, and the most segments and readings. */
 export const MAX_TEMPLATE = 200;
@@ -51,6 +51,10 @@ export const READINGS = Object.freeze([
     {id: 'profile', label: 'Power profile', icon: 'profile', series: null, template: '{profile}'},
     {id: 'clock', label: 'CPU clock', icon: 'cpu', series: null, template: '{clock} GHz'},
     {id: 'clock-max', label: 'CPU clock, fastest core', icon: 'cpu', series: null, template: '{clock-max} GHz'},
+    {id: 'ram', label: 'RAM usage', icon: 'memory', series: 'memory-usage', template: '{ram}%'},
+    {id: 'ram-used', label: 'RAM used of total', icon: 'memory', series: 'memory-usage',
+        template: '{ram-used}/{ram-total} GiB'},
+    {id: 'ram-total', label: 'RAM total', icon: 'memory', series: null, template: '{ram-total} GiB'},
 ]);
 
 const READING = Object.freeze(Object.fromEntries(READINGS.map(r => [r.id, r])));
@@ -607,6 +611,9 @@ export function makeResolver(snapshot, options = {}) {
             : none),
         'clock': d => number(usage.averageGhz, d, 1),
         'clock-max': d => number(usage.maxGhz, d, 1),
+        'ram': d => number(usage.ram, d, 0),
+        'ram-used': d => number(usage.ramUsedGib, d, 1),
+        'ram-total': d => number(usage.ramTotalGib, d, 1),
     };
 
     return (name, decimals = null) => {
@@ -806,7 +813,9 @@ export function sampleSnapshot() {
             Fans: [['Fan 1', 2350], ['Fan 2', 2100]],
             Temperatures: [],
         }),
-        usage: usageFromDbus({CpuUsage: [true, 23], CpuFrequency: [true, 1.4, 3.8], GpuUsage: [true, 9]}),
+        usage: usageFromDbus({
+            CpuUsage: [true, 23], CpuFrequency: [true, 1.4, 3.8], GpuUsage: [true, 9], Memory: [true, 40, 12.4, 31.1],
+        }),
         power: powerFromDbus({
             GpuPower: [true, 6.2],
             CpuPower: [true, 12.3],
@@ -834,6 +843,7 @@ export function sampleHistory() {
             'gpu-usage': wave(20, 18, 7, 3).map(v => Math.max(0, Math.min(100, v))),
             'cpu-watts': wave(14, 6, 6),
             'battery-watts': wave(24, 6, 11),
+            'memory-usage': wave(40, 4, 17, 1),
         },
     };
 }

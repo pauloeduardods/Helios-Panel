@@ -3,7 +3,7 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
-    Level, batteryStateLabel, daemonMessage, formatClock, formatDuration, formatPercent, formatRpm,
+    Level, batteryStateLabel, daemonMessage, formatClock, formatMemory, formatDuration, formatPercent, formatRpm,
     formatTemp, formatWatts, pickCpu, pickGpu, powerFromDbus, powerPanelText, profileColor,
     profileFromDbus, profileLabel, sanitizeThresholds, sensorsFromDbus, setProfileError, tempLevel,
     usageFromDbus, historyFromDbus, sparklineSegments, sparklinePieces, HistoryBuffer,
@@ -129,15 +129,22 @@ test('drives and the Wi-Fi card become plain objects', () => {
 });
 
 test('usage and clock', () => {
-    const u = usageFromDbus({CpuUsage: [true, 23], CpuFrequency: [true, 1.4, 3.8], GpuUsage: [false, 0]});
-    assert.deepEqual(u, {cpu: 23, gpu: null, averageGhz: 1.4, maxGhz: 3.8});
+    const u = usageFromDbus({
+        CpuUsage: [true, 23], CpuFrequency: [true, 1.4, 3.8], GpuUsage: [false, 0], Memory: [true, 40, 12.4, 31.1],
+    });
+    assert.deepEqual(u, {cpu: 23, gpu: null, averageGhz: 1.4, maxGhz: 3.8, ram: 40, ramUsedGib: 12.4, ramTotalGib: 31.1});
+    assert.equal(formatMemory(u), '12.4 / 31.1 GiB · 40%');
     assert.equal(formatPercent(u.cpu), '23%');
     assert.equal(formatPercent(u.gpu), '--');
     assert.equal(formatClock(u), '1.4 GHz · max 3.8 GHz');
 
     const older = usageFromDbus({});
-    assert.deepEqual(older, {cpu: null, gpu: null, averageGhz: null, maxGhz: null}, 'API v3 heliosd');
+    assert.deepEqual(older, {
+        cpu: null, gpu: null, averageGhz: null, maxGhz: null, ram: null, ramUsedGib: null, ramTotalGib: null,
+    }, 'API v3 heliosd');
     assert.equal(formatClock(older), null);
+    assert.equal(formatMemory(older), null);
+    assert.equal(usageFromDbus({Memory: [false, 0, 0, 0]}).ram, null);
     assert.deepEqual(usageFromDbus(), older);
 });
 
@@ -235,12 +242,12 @@ test('the local history loads GetHistory, then grows and trims to five minutes',
 test('a history sample takes the battery draw only while discharging', () => {
     const snapshot = discharging => ({
         sensors: {cpu: {celsius: 61}, gpu: {celsius: null}},
-        usage: {cpu: 23, gpu: null},
+        usage: {cpu: 23, gpu: null, ram: 40},
         power: {cpuWatts: 12.3, battery: {state: discharging ? 'discharging' : 'charging', watts: 24.5}},
     });
     assert.deepEqual(historySample(snapshot(true)), {
         'cpu-celsius': 61, 'gpu-celsius': null, 'cpu-usage': 23, 'gpu-usage': null,
-        'cpu-watts': 12.3, 'battery-watts': 24.5,
+        'cpu-watts': 12.3, 'battery-watts': 24.5, 'memory-usage': 40,
     });
     assert.equal(historySample(snapshot(false))['battery-watts'], null);
 });
@@ -375,6 +382,7 @@ test('lighting labels and errors', () => {
 
 test('collapsed menu titles summarize their section', () => {
     assert.equal(usageSummary({cpu: 23.4, gpu: 4, averageGhz: null, maxGhz: null}), 'Usage · CPU 23% · GPU 4%');
+    assert.equal(usageSummary({cpu: 23, gpu: null, ram: 40}), 'Usage · CPU 23% · RAM 40%');
     assert.equal(usageSummary({cpu: null, gpu: null}), 'Usage');
     assert.equal(powerSummary({source: 'ac', battery: {percent: 80, watts: 0}}), 'Power · AC · 80%');
     assert.equal(powerSummary({source: 'battery', battery: {percent: 64.4, watts: 18.2}}), 'Power · 64% · 18.2 W');

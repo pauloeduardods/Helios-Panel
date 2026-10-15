@@ -24,16 +24,18 @@ pub enum Series {
     CpuWatts,
     /// Only while discharging: what the whole laptop draws.
     BatteryWatts,
+    MemoryUsage,
 }
 
 impl Series {
-    pub const ALL: [Series; 6] = [
+    pub const ALL: [Series; 7] = [
         Series::CpuCelsius,
         Series::GpuCelsius,
         Series::CpuUsage,
         Series::GpuUsage,
         Series::CpuWatts,
         Series::BatteryWatts,
+        Series::MemoryUsage,
     ];
 
     /// The name clients ask for and receive.
@@ -45,6 +47,7 @@ impl Series {
             Series::GpuUsage => "gpu-usage",
             Series::CpuWatts => "cpu-watts",
             Series::BatteryWatts => "battery-watts",
+            Series::MemoryUsage => "memory-usage",
         }
     }
 
@@ -61,6 +64,7 @@ impl Series {
                 .as_ref()
                 .filter(|b| b.state == BatteryState::Discharging)
                 .and_then(|b| b.watts),
+            Series::MemoryUsage => s.memory.usage_percent,
         }
     }
 }
@@ -192,7 +196,8 @@ mod tests {
                 "cpu-usage",
                 "gpu-usage",
                 "cpu-watts",
-                "battery-watts"
+                "battery-watts",
+                "memory-usage"
             ]
         );
     }

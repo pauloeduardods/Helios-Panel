@@ -200,6 +200,15 @@ fn render(status: &Status) -> String {
     if !usage.is_empty() {
         line("Usage", usage.join(", "));
     }
+    let memory = &status.memory;
+    if let (Some(used), Some(total), Some(p)) =
+        (memory.used_gib, memory.total_gib, memory.usage_percent)
+    {
+        line(
+            "Memory",
+            format!("{used:.1} / {total:.1} GiB ({})", percent(p)),
+        );
+    }
     if let (Some(average), Some(max)) = (status.cpu.average_ghz, status.cpu.max_ghz) {
         line(
             "Clock",
@@ -315,6 +324,7 @@ fn render_history(snapshot: &Snapshot) -> String {
             Series::GpuUsage => ("GPU", "%"),
             Series::CpuWatts => ("CPU", "W"),
             Series::BatteryWatts => ("Battery", "W"),
+            Series::MemoryUsage => ("RAM", "%"),
         };
         let low = known.iter().copied().fold(f64::INFINITY, f64::min);
         let high = known.iter().copied().fold(f64::NEG_INFINITY, f64::max);
@@ -520,6 +530,7 @@ mod tests {
 CPU      61.0 °C  (hwmon:coretemp/Package id 0)
 GPU      no sensor found
 Fans     Fan 1 2350 RPM, Fan 2 2600 RPM
+Memory   12.4 / 31.1 GiB (40%)
 Clock    2.1 GHz average, 4.8 GHz max
 Drives   CT500P2SSD8 44.9 °C, SAMSUNG MZVL21T0HCLR-00B07 47.9 °C
 Wi-Fi    52.0 °C
@@ -579,6 +590,10 @@ Choices  low-power, quiet, balanced, balanced-performance, performance
         clock.advance(2);
         let text = render(&monitor.poll(&fs, Some(&smi), &clock));
         assert!(text.contains("\nUsage    CPU 23%, GPU 30%\n"), "{text}");
+        assert!(
+            text.contains("\nMemory   12.4 / 31.1 GiB (40%)\n"),
+            "{text}"
+        );
     }
 
     #[test]
@@ -613,7 +628,7 @@ Choices  low-power, quiet, balanced, balanced-performance, performance
         // The fixture's RAPL counter is readable and never moves: 0 W.
         assert_eq!(
             names,
-            ["CPU °C", "CPU W"],
+            ["CPU °C", "CPU W", "RAM %"],
             "the asleep GPU is left out: {text}"
         );
         let cpu = text.lines().next().unwrap();

@@ -11,6 +11,7 @@ pub mod history;
 pub mod hwmon;
 pub mod io;
 pub mod lighting;
+pub mod memory;
 pub mod nvidia;
 pub mod power;
 pub mod profile;

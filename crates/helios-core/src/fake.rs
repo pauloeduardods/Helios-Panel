@@ -37,6 +37,11 @@ pub const PHN16_72: &[(&str, &str)] = &[
     ("/sys/class/hwmon/hwmon6/device/model", "CT500P2SSD8"),
     ("/sys/class/hwmon/hwmon10/name", "iwlwifi_1_6"),
     ("/sys/class/hwmon/hwmon10/temp1_input", "52000"),
+    // 32 GB of RAM, of which 12.4 GiB in use.
+    (
+        "/proc/meminfo",
+        "MemTotal:       32594412 kB\nMemFree:         4194304 kB\nMemAvailable:   19594412 kB\n",
+    ),
     // 32 threads in the real machine; four policies are enough here.
     (
         "/proc/stat",

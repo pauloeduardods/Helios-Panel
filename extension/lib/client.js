@@ -42,6 +42,7 @@ const INTROSPECTION = `
     <property name="CpuUsage" type="(bd)" access="read"/>
     <property name="CpuFrequency" type="(bdd)" access="read"/>
     <property name="GpuUsage" type="(bd)" access="read"/>
+    <property name="Memory" type="(bddd)" access="read"/>
     <property name="Devices" type="a(ssd)" access="read"/>
     <method name="GetHistory">
       <arg name="ages" type="ad" direction="out"/>
@@ -177,7 +178,7 @@ export class HeliosClient {
             state: this._state,
             version: p ? cachedProps(p.daemon, ['Version']).Version ?? null : null,
             sensors: sensorsFromDbus(p ? cachedProps(p.sensors, ['Cpu', 'Gpu', 'Fans', 'Temperatures', 'Devices']) : {}),
-            usage: usageFromDbus(p ? cachedProps(p.sensors, ['CpuUsage', 'CpuFrequency', 'GpuUsage']) : {}),
+            usage: usageFromDbus(p ? cachedProps(p.sensors, ['CpuUsage', 'CpuFrequency', 'GpuUsage', 'Memory']) : {}),
             power: powerFromDbus(p ? cachedProps(p.sensors, ['GpuPower', 'CpuPower', 'PowerSource', 'Battery']) : {}),
             profile: profileFromDbus(p ? cachedProps(p.profile, ['Available', 'Active', 'Choices', 'Driver']) : {}),
             lighting: lightingFromDbus(p ? cachedProps(p.lighting, ['Effects', 'Directions', 'LogoModes', 'Keyboard', 'Logo']) : {}),

@@ -10,6 +10,7 @@ use std::time::Duration;
 use crate::cpu::{self, CpuUsageMeter, FrequencyReader};
 use crate::hwmon::{self, DeviceKind, milli_to_celsius};
 use crate::io::{Clock, GpuQuery, SysFs, read_int};
+use crate::memory;
 use crate::nvidia::{GpuState, NvidiaGpu};
 use crate::power::{PowerMonitor, PowerStatus};
 use crate::profile::{self, ProfileState};
@@ -27,6 +28,7 @@ pub struct Status {
     pub cpu: CpuStatus,
     pub gpu: GpuStatus,
     pub fans: Vec<FanStatus>,
+    pub memory: MemoryStatus,
     pub power: PowerStatus,
     pub profile: ProfileState,
     pub temperatures: Vec<TempStatus>,
@@ -54,6 +56,16 @@ pub struct GpuStatus {
     pub celsius: Option<f64>,
     /// Board power draw; only from nvidia-smi.
     pub watts: Option<f64>,
+    pub usage_percent: Option<f64>,
+}
+
+/// RAM in use: everything but what the kernel reports as available.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct MemoryStatus {
+    /// GiB, rounded to 0.1.
+    pub used_gib: Option<f64>,
+    pub total_gib: Option<f64>,
+    /// Whole percent.
     pub usage_percent: Option<f64>,
 }
 
@@ -323,11 +335,19 @@ impl Monitor {
         found.values.clear();
         self.discovery = Some(found);
 
+        let memory = memory::read(fs);
+        let memory = MemoryStatus {
+            used_gib: memory.map(|m| m.used_gib),
+            total_gib: memory.map(|m| m.total_gib),
+            usage_percent: memory.map(|m| m.percent),
+        };
+
         Status {
             schema: SCHEMA_VERSION,
             cpu,
             gpu,
             fans,
+            memory,
             power: self.power.poll(fs, clock),
             profile: profile::read_state(fs),
             temperatures,
@@ -363,6 +383,7 @@ mod tests {
                     "usage_percent": null,
                 },
                 "fans": [{"label": "Fan 1", "rpm": 2350}, {"label": "Fan 2", "rpm": 2600}],
+                "memory": {"used_gib": 12.4, "total_gib": 31.1, "usage_percent": 40.0},
                 "power": {
                     "source": "ac",
                     "battery": {
@@ -629,6 +650,7 @@ mod tests {
             "no /proc/stat in this fixture"
         );
         assert_eq!(status.cpu.average_ghz, None);
+        assert_eq!(status.memory.usage_percent, None, "no /proc/meminfo either");
         assert!(status.devices.is_empty());
     }
 

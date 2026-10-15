@@ -492,6 +492,10 @@ fn properties_reflect_the_sysfs_tree() {
             "the GPU is asleep"
         );
         assert_eq!(
+            h.get::<(bool, f64, f64, f64)>(SENSORS, "Memory").await,
+            (true, 40.0, 12.4, 31.1)
+        );
+        assert_eq!(
             h.get::<(bool, f64)>(SENSORS, "GpuPower").await,
             (false, 0.0)
         );
@@ -521,7 +525,7 @@ fn properties_reflect_the_sysfs_tree() {
             ]
         );
 
-        assert_eq!(h.get::<u32>(DAEMON, "ApiVersion").await, 7);
+        assert_eq!(h.get::<u32>(DAEMON, "ApiVersion").await, 8);
         assert_eq!(
             h.get::<String>(DAEMON, "Version").await,
             env!("CARGO_PKG_VERSION")
