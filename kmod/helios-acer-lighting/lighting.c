@@ -8,8 +8,12 @@
 
 /* Method 20 byte 9 selects the target. Only the keyboard is ever sent. */
 #define TARGET_KEYBOARD 1
-/* Method 20 bytes 3 and 4: this pair means "keep the current direction". */
-#define KEEP_DIRECTION_MARK 0x08
+/*
+ * Method 20 byte 8, stored by the firmware as KLES. The ACPI code only
+ * stores it, but the static effect stays dark unless it is 3, the value the
+ * community driver tested on this model sends (docs/LIGHTING.md).
+ */
+#define STORED_STATE 3
 
 /* Indexed by the firmware's effect number. */
 static const char *const effects[] = {
@@ -203,19 +207,19 @@ static int set(const struct hal_fw *fw, enum hal_method method, const u8 *in, si
 }
 
 static int set_effect(const struct hal_fw *fw, u8 effect, u8 speed, u8 brightness,
-		      u8 dir_mark, u8 direction, struct rgb c)
+		      u8 direction, struct rgb c)
 {
 	u8 in[HAL_SET_EFFECT_IN] = { 0 };
 
 	in[0] = effect;
 	in[1] = speed;
 	in[2] = brightness;
-	in[3] = dir_mark;
+	in[3] = 0;
 	in[4] = direction;
 	in[5] = c.r;
 	in[6] = c.g;
 	in[7] = c.b;
-	in[8] = 0;
+	in[8] = STORED_STATE;
 	in[9] = TARGET_KEYBOARD;
 	return set(fw, HAL_SET_EFFECT, in, sizeof(in));
 }
@@ -246,7 +250,7 @@ int hal_effect_store(const struct hal_fw *fw, const char *buf, size_t len)
 	    parse_rgb(t.word[4], t.len[4], &c))
 		return -EINVAL;
 
-	return set_effect(fw, effect, speed, brightness, 0, direction, c);
+	return set_effect(fw, effect, speed, brightness, direction, c);
 }
 
 int hal_effect_show(const struct hal_fw *fw, char *buf)
@@ -273,6 +277,7 @@ int hal_zones_store(const struct hal_fw *fw, const char *buf, size_t len)
 {
 	struct tokens t;
 	struct rgb c[HAL_ZONES];
+	const struct rgb black = { 0, 0, 0 };
 	u8 brightness;
 	size_t i;
 	int ret;
@@ -284,8 +289,11 @@ int hal_zones_store(const struct hal_fw *fw, const char *buf, size_t len)
 		if (parse_rgb(t.word[1 + i], t.len[1 + i], &c[i]))
 			return -EINVAL;
 
-	/* Static effect at this brightness, keeping the stored direction. */
-	ret = set_effect(fw, 0, 0, brightness, KEEP_DIRECTION_MARK, 0, c[0]);
+	/*
+	 * Static effect at this brightness, then each zone's colour. The
+	 * static call carries no direction and no colour of its own.
+	 */
+	ret = set_effect(fw, 0, 0, brightness, 0, black);
 	if (ret)
 		return ret;
 

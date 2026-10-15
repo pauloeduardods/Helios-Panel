@@ -174,4 +174,4 @@ module_wmi_driver(helios_lighting_driver);
 MODULE_AUTHOR("Helios Panel contributors");
 MODULE_DESCRIPTION("Keyboard RGB for Acer Predator laptops (Helios Panel)");
 MODULE_LICENSE("GPL");
-MODULE_VERSION("0.1.0");
+MODULE_VERSION("0.1.1");

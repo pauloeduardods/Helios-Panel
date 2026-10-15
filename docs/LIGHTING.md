@@ -56,7 +56,7 @@ Input: a 16-byte buffer.
 | 2 | brightness | 0–100; `0xFF` = keep |
 | 3, 4 | direction | byte 4 is the direction (1 right-to-left, 2 left-to-right). The firmware does **not** write it when byte 3 is `0x08` and byte 4 is `0` |
 | 5–7 | red, green, blue | 0–255 |
-| 8 | stored state (`KLES`/`LLES`) | stored as-is and returned by method 21; its meaning is unknown |
+| 8 | stored state (`KLES`/`LLES`) | stored as-is and returned by method 21. The ACPI code gives it no meaning, but the EC reads it: with 0 the static effect stays dark (see [the hardware results](#hardware-test-results)). Helios sends 3, like the community driver tested on this model |
 | 9 | **target** | `1` keyboard; `2` the `LB` target; **any other value** writes the keyboard and also sets a "sync" flag (`KLSY = 1`) |
 | 10–15 | unused | 0 |
 
@@ -94,8 +94,9 @@ implement the same methods. Their descriptions are only partly right.
 - Both treat byte 9 of method 20 as an "enable flag, must be 1". **It is the
   target selector.** Sending anything other than 1 or 2 is not rejected:
   it silently turns on keyboard sync.
-- They disagree on byte 8 (3 or 0). The firmware only stores it, so both
-  work. Helios will send 0 and read it back.
+- They disagree on byte 8 (3 or 0). The ACPI code only stores it, so this
+  plan first concluded that both work and sent 0. On the hardware, 0 left
+  the static effect dark; Helios now sends 3, as Linuwu-Sense does.
 - They disagree on method 6's argument size (a 4-byte buffer or an 8-byte
   integer). The firmware reads the same first bytes from either.
 
@@ -172,7 +173,7 @@ Until then, logo support stays out of the D-Bus API.
   | Attribute | Write | Firmware calls |
   |---|---|---|
   | `keyboard_effect` | `<effect> <speed> <brightness> <direction> <rrggbb>`, e.g. `breathing 4 80 right ff0000` | method 20, target 1 |
-  | `keyboard_zones` | `<brightness> <rrggbb> <rrggbb> <rrggbb> <rrggbb>` | method 20 (static, direction kept) + method 6 for zones 1 to 4 |
+  | `keyboard_zones` | `<brightness> <rrggbb> <rrggbb> <rrggbb> <rrggbb>` | method 20 (static, with no direction or colour) + method 6 for zones 1 to 4 |
 
   - `effect`: `static`, `breathing`, `neon`, `wave`, `shifting` or `zoom`.
   - `speed`: 0 to 9. `brightness`: 0 to 100. Plain decimal, no sign, no
@@ -229,8 +230,8 @@ commands, adapted to what is missing):
 
 ```bash
 sudo apt install dkms linux-headers-$(uname -r)   # if not installed yet
-sudo cp -r kmod/helios-acer-lighting /usr/src/helios-acer-lighting-0.1.0
-sudo dkms install helios-acer-lighting/0.1.0
+sudo cp -rT kmod/helios-acer-lighting /usr/src/helios-acer-lighting-0.1.1
+sudo dkms install helios-acer-lighting/0.1.1
 ```
 
 Then, with Secure Boot **off**, or **on with the DKMS key already
@@ -252,9 +253,14 @@ With Secure Boot **on** and no key enrolled yet (only once per machine):
 4. The module loads by itself from then on. The password is not needed
    again, and nothing appears on later boots.
 
+To update to a newer version, `heliosctl doctor` warns when the loaded
+module is older than the source tree and prints the commands: unload it,
+`dkms remove` the old version, copy and `dkms install` the new one, load it
+again. The key stays enrolled, so no reboot is needed.
+
 To remove the module: `sudo modprobe -r helios_acer_lighting`, then
-`sudo dkms remove helios-acer-lighting/0.1.0 --all` and
-`sudo rm -r /usr/src/helios-acer-lighting-0.1.0`. To remove the key:
+`sudo dkms remove helios-acer-lighting/<version> --all` and
+`sudo rm -r /usr/src/helios-acer-lighting-<version>`. To remove the key:
 `sudo mokutil --delete /var/lib/shim-signed/mok/MOK.der`, confirmed the same
 way on the next boot.
 
@@ -332,6 +338,28 @@ D=/sys/bus/wmi/devices/7A4DDFE7-5B5D-40B4-8595-4408E0CC7F56
 
 The `LB` (logo) probe is not part of this protocol; it needs its own
 approval.
+
+### Hardware test results
+
+First run, 2026-10-14, module 0.1.0, BIOS V1.20:
+
+| Step | Result |
+|---|---|
+| 1. bound | ok: both files root-only; `acer_wmi` and the platform profile unaffected |
+| 2. read | `wave 5 100 left 000000` and all zones `000000`, matching the rainbow wave on the keyboard |
+| 3. `static … ff0000` | accepted and read back, but the keyboard went **dark** |
+| 5. zones | the four colours appeared, left to right, the first time |
+| 4. zones at 30, then 100 | **dark** both times; repeating step 5, with or without changing the colours, stayed dark |
+| 6. effects | all six work as named; `wave` both directions; `shifting` sweeps on and off from side to side; `zoom` grows from the middle to the edges |
+| 7. rejection | `wave 10 …` failed with "Invalid argument", nothing changed |
+
+Every write was read back exactly, so the EC stored what was sent; only the
+static effect did not light. The only differences from Linuwu-Sense's
+static sequence, which is reported working on this model, were byte 8 (0
+instead of 3), the direction bytes (`8, 0` "keep" instead of `0, 0`) and a
+colour in the static call. Module 0.1.1 matches that sequence. The steps
+above are repeated with it, the zones several times in a row with different
+brightness levels.
 
 ## Safety summary
 

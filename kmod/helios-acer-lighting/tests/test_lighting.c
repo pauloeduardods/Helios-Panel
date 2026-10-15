@@ -128,7 +128,9 @@ static void check_invariants(void)
 			CHECK(c->in[0] <= 5, "effect %u", c->in[0]);
 			CHECK(c->in[1] <= 9, "speed %u", c->in[1]);
 			CHECK(c->in[2] <= 100, "brightness %u", c->in[2]);
-			CHECK(c->in[8] == 0, "byte 8 is %u", c->in[8]);
+			CHECK(c->in[3] == 0, "byte 3 is %u", c->in[3]);
+			CHECK(c->in[4] <= 2, "direction %u", c->in[4]);
+			CHECK(c->in[8] == 3, "byte 8 is %u, not 3", c->in[8]);
 			for (int b = 10; b < 16; b++)
 				CHECK(c->in[b] == 0, "method 20 byte %d is %u", b, c->in[b]);
 			break;
@@ -160,7 +162,7 @@ static void test_effect_bytes(void)
 	reset();
 	CHECK(effect_store("wave 4 80 right ff8000\n") == 0, "valid line rejected");
 	CHECK(fake.count == 1 && fake.calls[0].method == HAL_SET_EFFECT, "one method 20 call");
-	const u8 want[16] = { 3, 4, 80, 0, 2, 0xff, 0x80, 0x00, 0, 1 };
+	const u8 want[16] = { 3, 4, 80, 0, 2, 0xff, 0x80, 0x00, 3, 1 };
 	check_bytes(&fake.calls[0], want, 16, "wave");
 }
 
@@ -311,7 +313,8 @@ static void test_zones_bytes(void)
 	CHECK(zones_store("60 ff0000 00ff00 0000ff ffffff\n") == 0, "valid zones rejected");
 	CHECK(fake.count == 5, "%zu calls, want 5", fake.count);
 
-	const u8 effect[16] = { 0, 0, 60, 0x08, 0, 0xff, 0, 0, 0, 1 };
+	/* As the community driver does on this model: no direction or colour. */
+	const u8 effect[16] = { 0, 0, 60, 0, 0, 0, 0, 0, 3, 1 };
 
 	CHECK(fake.calls[0].method == HAL_SET_EFFECT, "first call is method 20");
 	check_bytes(&fake.calls[0], effect, 16, "static effect");
