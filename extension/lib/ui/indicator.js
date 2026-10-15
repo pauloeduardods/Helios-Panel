@@ -25,7 +25,7 @@ import {
 import {
     EFFECTS_WITH_COLOR, EFFECTS_WITH_DIRECTION, LIGHT_COLORS, Level, barPieces, batteryStateLabel,
     daemonMessage, effectLabel, formatClock, formatDuration, formatPercent, formatTemp, formatWatts,
-    keyboardRequest, lightingError, logoRequest, parseColor, pickCpu, pickGpu, powerSummary,
+    keyboardRequest, lightingError, logoModeLabel, logoRequest, parseColor, pickCpu, pickGpu, powerSummary,
     profileLabel, setProfileError, sparklinePieces, tempLevel, usageSummary,
 } from '../model.js';
 
@@ -329,9 +329,12 @@ class HeliosIndicator extends PanelMenu.Button {
         this._logoMenu = new PopupMenu.PopupSubMenuMenuItem('Lid logo');
         this._logoSwitch = new PopupMenu.PopupSwitchMenuItem('On', false);
         this._logoSwitch.connect('toggled', (_item, on) => this._setLogo({on}));
+        this._logoModeSection = new PopupMenu.PopupMenuSection();
+        this._logoModeItems = new Map();
+        this._logoModeKey = '';
         this._logoBrightness = makeSliderRow('Brightness', v => this._setLogo({on: true, brightness: v * 100}));
         this._logoColors = makeSwatchRow(color => this._setLogo({on: true, color}));
-        for (const item of [this._logoSwitch, this._logoBrightness.item, this._logoColors.item])
+        for (const item of [this._logoSwitch, this._logoModeSection, this._logoBrightness.item, this._logoColors.item])
             this._logoMenu.menu.addMenuItem(item);
         this._lightSection.addMenuItem(this._logoMenu);
 
@@ -640,11 +643,27 @@ class HeliosIndicator extends PanelMenu.Button {
         this._kbColors.item.visible = EFFECTS_WITH_COLOR.includes(keyboard.effect);
         this._kbColors.select(keyboard.color);
 
-        this._logoMenu.label.text = `Lid logo · ${logo.on ? 'On' : 'Off'}`;
+        const modes = lighting.logoModes.join(',');
+        if (modes !== this._logoModeKey) {
+            this._logoModeKey = modes;
+            this._logoModeSection.removeAll();
+            this._logoModeItems = new Map();
+            for (const id of lighting.logoModes) {
+                const item = new PopupMenu.PopupMenuItem(logoModeLabel(id));
+                item.connect('activate', () => this._setLogo({on: true, mode: id}));
+                this._logoModeSection.addMenuItem(item);
+                this._logoModeItems.set(id, item);
+            }
+        }
+        for (const [id, item] of this._logoModeItems)
+            item.setOrnament(id === logo.mode ? PopupMenu.Ornament.DOT : PopupMenu.Ornament.NONE);
+        this._logoMenu.label.text = `Lid logo · ${logo.on ? logoModeLabel(logo.mode) : 'Off'}`;
         this._logoSwitch.setToggleState(logo.on);
+        this._logoModeSection.actor.visible = logo.on;
         this._logoBrightness.item.visible = logo.on;
         this._logoBrightness.set(logo.brightness / 100);
-        this._logoColors.item.visible = logo.on;
+        // Cycling ignores the colour.
+        this._logoColors.item.visible = logo.on && logo.mode !== 'cycle';
         this._logoColors.select(logo.color);
     }
 

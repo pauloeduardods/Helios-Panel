@@ -62,8 +62,9 @@ const INTROSPECTION = `
   <interface name="${IFACE}.Lighting">
     <property name="Effects" type="as" access="read"/>
     <property name="Directions" type="as" access="read"/>
+    <property name="LogoModes" type="as" access="read"/>
     <property name="Keyboard" type="(suuss)" access="read"/>
-    <property name="Logo" type="(bus)" access="read"/>
+    <property name="Logo" type="(buss)" access="read"/>
     <method name="SetKeyboardEffect">
       <arg name="effect" type="s" direction="in"/>
       <arg name="speed" type="u" direction="in"/>
@@ -75,6 +76,7 @@ const INTROSPECTION = `
       <arg name="on" type="b" direction="in"/>
       <arg name="brightness" type="u" direction="in"/>
       <arg name="color" type="s" direction="in"/>
+      <arg name="mode" type="s" direction="in"/>
     </method>
   </interface>
 </node>`;
@@ -178,7 +180,7 @@ export class HeliosClient {
             usage: usageFromDbus(p ? cachedProps(p.sensors, ['CpuUsage', 'CpuFrequency', 'GpuUsage']) : {}),
             power: powerFromDbus(p ? cachedProps(p.sensors, ['GpuPower', 'CpuPower', 'PowerSource', 'Battery']) : {}),
             profile: profileFromDbus(p ? cachedProps(p.profile, ['Available', 'Active', 'Choices', 'Driver']) : {}),
-            lighting: lightingFromDbus(p ? cachedProps(p.lighting, ['Effects', 'Directions', 'Keyboard', 'Logo']) : {}),
+            lighting: lightingFromDbus(p ? cachedProps(p.lighting, ['Effects', 'Directions', 'LogoModes', 'Keyboard', 'Logo']) : {}),
         };
     }
 
@@ -217,9 +219,9 @@ export class HeliosClient {
             SET_LIGHTING_TIMEOUT_MS);
     }
 
-    /** @param {[boolean, number, string]} args see logoRequest */
+    /** @param {[boolean, number, string, string]} args see logoRequest */
     setLogo(args) {
-        return this._write('lighting', 'SetLogo', new GLib.Variant('(bus)', args), SET_LIGHTING_TIMEOUT_MS);
+        return this._write('lighting', 'SetLogo', new GLib.Variant('(buss)', args), SET_LIGHTING_TIMEOUT_MS);
     }
 
     /** The recent history as {ages, series} (see HistoryBuffer.view). */
