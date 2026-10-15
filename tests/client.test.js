@@ -304,3 +304,21 @@ test('lighting writes while heliosd is not running fail without a call', async (
     await assert.rejects(client.setKeyboardEffect(['wave', 4, 80, 'left', '#ff0000']), {name: 'NotRunning'});
     assert.equal(globalThis.FAKE_BUS.calls.length, 0);
 });
+
+test('the snapshot is built once per change and shared', async () => {
+    const {client} = start();
+    globalThis.FAKE_BUS.appear();
+    await tick();
+    const first = client.snapshot();
+    assert.equal(client.snapshot(), first, 'same object until something changes');
+
+    globalThis.FAKE_BUS.props[`${IFACE}.Sensors`].Cpu = ['hwmon:coretemp/Package id 0', true, 70];
+    globalThis.FAKE_BUS.proxies[`${IFACE}.Sensors`].emit('g-properties-changed');
+    const second = client.snapshot();
+    assert.notEqual(second, first);
+    assert.equal(second.sensors.cpu.celsius, 70);
+
+    globalThis.FAKE_BUS.vanish();
+    await tick();
+    assert.equal(client.snapshot().state, 'not-running');
+});

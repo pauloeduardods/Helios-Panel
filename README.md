@@ -161,6 +161,9 @@ npm test          # extension tests (node, fake D-Bus, no GNOME needed) and the
                   # kernel module's protocol tests (needs gcc and make)
 npm run check     # syntax check of every module
 
+tools/footprint.sh live 120    # what the installed heliosd and gnome-shell cost (read-only)
+tools/footprint.sh bench target/release/heliosd 120   # compare two heliosd builds
+
 # reload the extension after ./install.sh: on X11, Alt+F2, r, Enter (no logout);
 # re-enabling alone keeps the old code, because GNOME caches loaded modules.
 

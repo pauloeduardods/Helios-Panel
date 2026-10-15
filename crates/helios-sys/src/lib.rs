@@ -32,11 +32,18 @@ impl RootedFs {
     }
 }
 
+/// Larger than any attribute Helios reads (/proc/stat is the largest).
+const MAX_ATTRIBUTE: u64 = 1 << 20;
+
 impl SysFs for RootedFs {
     fn read_to_string(&self, path: &str) -> Option<String> {
-        fs::read_to_string(self.map(path))
-            .ok()
-            .map(|s| s.trim().to_owned())
+        // `fs::read_to_string` first asks for the file's size (statx), which
+        // sysfs does not know anyway. Reading through `take` skips that: one
+        // syscall fewer per attribute, about 70 per poll.
+        let file = fs::File::open(self.map(path)).ok()?;
+        let mut text = String::with_capacity(256);
+        file.take(MAX_ATTRIBUTE).read_to_string(&mut text).ok()?;
+        Some(text.trim().to_owned())
     }
 
     fn read_dir(&self, path: &str) -> Vec<String> {

@@ -74,13 +74,35 @@ pub struct Frequency {
 
 /// From every `policyN/scaling_cur_freq` (kHz); `None` without cpufreq.
 pub fn read_frequency(fs: &dyn SysFs) -> Option<Frequency> {
-    let khz: Vec<i64> = fs
-        .read_dir(CPUFREQ)
-        .into_iter()
-        .filter(|name| name.starts_with("policy"))
-        .filter_map(|name| read_int(fs, &format!("{CPUFREQ}/{name}/scaling_cur_freq")))
-        .filter(|khz| *khz > 0)
-        .collect();
+    FrequencyReader::default().read(fs)
+}
+
+/// Reads the clock speed, keeping the list of cpufreq policies between reads.
+#[derive(Debug, Default)]
+pub struct FrequencyReader {
+    files: Option<Vec<String>>,
+}
+
+impl FrequencyReader {
+    /// Lists the policies again on the next read (CPUs going on or offline).
+    pub fn forget(&mut self) {
+        self.files = None;
+    }
+
+    pub fn read(&mut self, fs: &dyn SysFs) -> Option<Frequency> {
+        let files = self.files.get_or_insert_with(|| {
+            fs.read_dir(CPUFREQ)
+                .into_iter()
+                .filter(|name| name.starts_with("policy"))
+                .map(|name| format!("{CPUFREQ}/{name}/scaling_cur_freq"))
+                .collect()
+        });
+        frequency(files.iter().filter_map(|path| read_int(fs, path)))
+    }
+}
+
+fn frequency(khz: impl Iterator<Item = i64>) -> Option<Frequency> {
+    let khz: Vec<i64> = khz.filter(|khz| *khz > 0).collect();
     let max = *khz.iter().max()?;
     let average = khz.iter().sum::<i64>() as f64 / khz.len() as f64;
     let ghz = |khz: f64| (khz / 1e5).round() / 10.0;

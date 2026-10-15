@@ -457,6 +457,21 @@ item, in their order, with their icons, `°C` templates and graphs, and stores
 it. After that the old keys are never read; they stay in the schema only for
 this step.
 
+## Footprint budgets
+
+Helios watches power, so it must not cost power. These budgets come from the Milestone 6 audit ([FOOTPRINT.md](FOOTPRINT.md)); a change that breaks one needs a reason.
+
+| What | Budget | Checked by |
+|---|---|---|
+| heliosd CPU, own | < 0.2 % of one core | `tools/footprint.sh bench` |
+| Steady poll | lists 1 directory, reads no discovery file and no file twice, ≤ 32 reads on the PHN16-72 fixture | `cargo test` (`a_steady_poll_reads_only_values`) |
+| Discovery | every 30 s, or at once when an input that read stops reading | `cargo test` |
+| Drive temperatures | each drive read once per 30 s (a SMART read wakes the SSD) | `cargo test` |
+| heliosd memory | < 8 MB resident, flat (history is a fixed ring of 150 samples) | `tools/footprint.sh live`, `cargo test` |
+| D-Bus signals | ≤ 1 per 2 s tick, only properties that changed | `cargo test` (props) |
+| NVIDIA GPU | never woken; nvidia-smi ≤ once per 10 s while awake | `cargo test` (nvidia) |
+| Extension | no timers; top bar touched only where a value changed; the menu is not updated while closed | review, `tools/footprint.sh extension` |
+
 ## Test strategy
 
 Every rule in this section is enforced in CI (`checks` job).

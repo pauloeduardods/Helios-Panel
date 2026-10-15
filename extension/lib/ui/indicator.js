@@ -167,6 +167,12 @@ class HeliosIndicator extends PanelMenu.Button {
 
         this._buildPanel();
         this._buildMenu();
+        // The menu is not kept up to date while it is closed (most of the
+        // time); opening it renders it first.
+        this.menu.connect('open-state-changed', (_menu, open) => {
+            if (open && this._menuStale)
+                this._render();
+        });
         for (const menu of [this.menu, this._usageMenu.menu, this._powerMenu.menu]) {
             menu.connect('open-state-changed', (_menu, open) => {
                 if (open)
@@ -393,6 +399,8 @@ class HeliosIndicator extends PanelMenu.Button {
             seg.box.visible = r.visible;
             if (!r.visible)
                 return;
+            // Only what changed is applied: a new style or markup makes
+            // gnome-shell restyle and lay out the actor again.
             seg.box.opacity = r.dim ? 128 : 255;
             if (r.icon !== seg.iconName) {
                 seg.iconName = r.icon;
@@ -400,13 +408,24 @@ class HeliosIndicator extends PanelMenu.Button {
             }
             seg.icon.visible = r.icon !== null;
             const color = segmentColor(r, style);
-            seg.icon.set_style(color ? `color: ${color};` : null);
+            const iconStyle = color ? `color: ${color};` : null;
+            if (iconStyle !== seg.iconStyle) {
+                seg.iconStyle = iconStyle;
+                seg.icon.set_style(iconStyle);
+            }
             seg.label.visible = r.showText;
-            seg.label.clutter_text.set_markup(segmentMarkup(r, style));
+            const markup = segmentMarkup(r, style);
+            if (markup !== seg.markup) {
+                seg.markup = markup;
+                seg.label.clutter_text.set_markup(markup);
+            }
             seg.spec = r.graph;
             seg.graph.visible = r.graph !== null;
             if (r.graph) {
-                seg.graph.set_width(r.graph.width);
+                if (r.graph.width !== seg.graphWidth) {
+                    seg.graphWidth = r.graph.width;
+                    seg.graph.set_width(r.graph.width);
+                }
                 seg.graph.queue_repaint();
             }
         });
@@ -450,6 +469,10 @@ class HeliosIndicator extends PanelMenu.Button {
         }
 
         this._history = this._client.historyView();
+        this._renderSegments(snap);
+        this._menuStale = !this.menu.isOpen;
+        if (this._menuStale)
+            return;
         const {sensors, usage, power, profile} = snap;
         this._renderCpu(pickCpu(sensors, this._settings.get_string('cpu-sensor')));
         this._renderGpu(pickGpu(sensors, this._settings.get_string('gpu-sensor')));
@@ -459,7 +482,6 @@ class HeliosIndicator extends PanelMenu.Button {
         this._renderPower(power);
         this._renderProfile(profile);
         this._renderLighting(snap.lighting);
-        this._renderSegments(snap);
         this._renderSparklines();
     }
 
