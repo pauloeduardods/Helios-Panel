@@ -298,17 +298,20 @@ class HeliosIndicator extends PanelMenu.Button {
         this.menu.addAction('Settings', () => this._ext.openPreferences());
     }
 
-    /** Keyboard effect, brightness, speed, direction and colour; the lid logo. */
+    /**
+     * Two collapsed submenus, so the menu stays short: the keyboard (effect,
+     * brightness, speed, direction, colour) and the lid logo.
+     */
     _buildLighting() {
         this._lighting = null;
         this._lightSection = new PopupMenu.PopupMenuSection();
         this._lightSection.addMenuItem(new PopupMenu.PopupSeparatorMenuItem('Lighting'));
 
-        this._effectMenu = new PopupMenu.PopupSubMenuMenuItem('Keyboard');
+        this._kbMenu = new PopupMenu.PopupSubMenuMenuItem('Keyboard');
+        this._effectSection = new PopupMenu.PopupMenuSection();
         this._effectItems = new Map();
         this._effectKey = '';
-        this._lightSection.addMenuItem(this._effectMenu);
-
+        this._kbMenu.menu.addMenuItem(this._effectSection);
         const keyboard = change => this._setKeyboard(change);
         this._kbBrightness = makeSliderRow('Brightness', v => keyboard({brightness: v * 100}));
         this._kbSpeed = makeSliderRow('Speed', v => keyboard({speed: v * 9}));
@@ -318,15 +321,19 @@ class HeliosIndicator extends PanelMenu.Button {
             keyboard({direction: current === 'left' ? 'right' : 'left'});
         });
         this._kbColors = makeSwatchRow(color => keyboard({color}));
+        this._kbMenu.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
         for (const item of [this._kbBrightness.item, this._kbSpeed.item, this._kbDirection, this._kbColors.item])
-            this._lightSection.addMenuItem(item);
+            this._kbMenu.menu.addMenuItem(item);
+        this._lightSection.addMenuItem(this._kbMenu);
 
-        this._logoSwitch = new PopupMenu.PopupSwitchMenuItem('Lid logo', false);
+        this._logoMenu = new PopupMenu.PopupSubMenuMenuItem('Lid logo');
+        this._logoSwitch = new PopupMenu.PopupSwitchMenuItem('On', false);
         this._logoSwitch.connect('toggled', (_item, on) => this._setLogo({on}));
         this._logoBrightness = makeSliderRow('Brightness', v => this._setLogo({on: true, brightness: v * 100}));
         this._logoColors = makeSwatchRow(color => this._setLogo({on: true, color}));
         for (const item of [this._logoSwitch, this._logoBrightness.item, this._logoColors.item])
-            this._lightSection.addMenuItem(item);
+            this._logoMenu.menu.addMenuItem(item);
+        this._lightSection.addMenuItem(this._logoMenu);
 
         this.menu.addMenuItem(this._lightSection);
     }
@@ -590,18 +597,18 @@ class HeliosIndicator extends PanelMenu.Button {
         const key = effects.join(',');
         if (key !== this._effectKey) {
             this._effectKey = key;
-            this._effectMenu.menu.removeAll();
+            this._effectSection.removeAll();
             this._effectItems = new Map();
             for (const id of effects) {
                 const item = new PopupMenu.PopupMenuItem(effectLabel(id));
                 item.connect('activate', () => this._setKeyboard({effect: id}));
-                this._effectMenu.menu.addMenuItem(item);
+                this._effectSection.addMenuItem(item);
                 this._effectItems.set(id, item);
             }
         }
         for (const [id, item] of this._effectItems)
             item.setOrnament(id === keyboard.effect ? PopupMenu.Ornament.DOT : PopupMenu.Ornament.NONE);
-        this._effectMenu.label.text = `Keyboard: ${effectLabel(keyboard.effect)}`;
+        this._kbMenu.label.text = `Keyboard: ${effectLabel(keyboard.effect)}`;
 
         this._kbBrightness.set(keyboard.brightness / 100);
         this._kbSpeed.set(keyboard.speed / 9);
@@ -611,6 +618,7 @@ class HeliosIndicator extends PanelMenu.Button {
         this._kbColors.item.visible = EFFECTS_WITH_COLOR.includes(keyboard.effect);
         this._kbColors.select(keyboard.color);
 
+        this._logoMenu.label.text = `Lid logo: ${logo.on ? 'On' : 'Off'}`;
         this._logoSwitch.setToggleState(logo.on);
         this._logoBrightness.item.visible = logo.on;
         this._logoBrightness.set(logo.brightness / 100);
