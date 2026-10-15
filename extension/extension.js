@@ -2,6 +2,7 @@
 import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
+import {HeliosAlerts} from './lib/ui/alerts.js';
 import {HeliosIndicator} from './lib/ui/indicator.js';
 
 export default class HeliosPanelExtension extends Extension {
@@ -10,9 +11,12 @@ export default class HeliosPanelExtension extends Extension {
         this._placementIds = ['changed::panel-position', 'changed::panel-index']
             .map(signal => this._settings.connect(signal, () => this._place()));
         this._place();
+        this._alerts = new HeliosAlerts(this._settings);
     }
 
     disable() {
+        this._alerts?.destroy();
+        this._alerts = null;
         for (const id of this._placementIds ?? [])
             this._settings.disconnect(id);
         this._placementIds = null;
