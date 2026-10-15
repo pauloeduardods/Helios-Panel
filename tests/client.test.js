@@ -131,7 +131,7 @@ test('setProfile calls SetProfile with a long timeout for polkit', async () => {
     globalThis.FAKE_BUS.appear();
     await tick();
     await client.setProfile('quiet');
-    const [call] = globalThis.FAKE_BUS.calls;
+    const call = globalThis.FAKE_BUS.calls.find(c => c.method === 'SetProfile');
     assert.equal(call.iface, `${IFACE}.Profile`);
     assert.equal(call.method, 'SetProfile');
     assert.equal(call.params.type, '(s)');
@@ -172,22 +172,35 @@ test('destroy unwatches the name and silences callbacks', async () => {
     assert.equal(changes(), before, 'no callbacks after destroy');
 });
 
-test('history() fetches GetHistory and turns it into plain arrays', async () => {
+test('the history is loaded once on connect, then grows with every Sensors update', async () => {
+    globalThis.FAKE_NOW_S = 1000;
+    globalThis.FAKE_BUS.replies = {GetHistory: [[2, 0], [['cpu-celsius', [true, true], [60, 61]]]]};
     const {client} = start();
     globalThis.FAKE_BUS.appear();
     await tick();
-    globalThis.FAKE_BUS.replies = {GetHistory: [[2, 0], [['cpu-celsius', [true, true], [60, 61]]]]};
-    assert.deepEqual(await client.history(), {ages: [2, 0], series: {'cpu-celsius': [60, 61]}});
-    const [call] = globalThis.FAKE_BUS.calls;
-    assert.equal(call.method, 'GetHistory');
-    assert.equal(call.iface, `${IFACE}.Sensors`);
+    await tick();
+    assert.deepEqual(globalThis.FAKE_BUS.calls.map(c => c.method), ['GetHistory']);
+    assert.deepEqual(client.historyView().series['cpu-celsius'], [60, 61]);
+
+    globalThis.FAKE_NOW_S = 1002;
+    globalThis.FAKE_BUS.props[`${IFACE}.Sensors`].Cpu = ['hwmon:coretemp/Package id 0', true, 65];
+    globalThis.FAKE_BUS.proxies[`${IFACE}.Sensors`].emit('g-properties-changed');
+    const view = client.historyView();
+    assert.deepEqual(view.ages, [4, 2, 0]);
+    assert.deepEqual(view.series['cpu-celsius'], [60, 61, 65]);
+    assert.deepEqual(view.series['cpu-usage'], [null, null, 23]);
+
+    globalThis.FAKE_BUS.proxies[`${IFACE}.Profile`].emit('g-properties-changed');
+    assert.equal(client.historyView().ages.length, 3, 'only Sensors updates add a sample');
+    assert.equal(globalThis.FAKE_BUS.calls.length, 1, 'no further calls');
 });
 
-test('history() is null when heliosd is older or gone', async () => {
+test('an older heliosd without GetHistory starts with an empty history', async () => {
+    globalThis.FAKE_BUS.callError = new GLib.Error('Unknown method GetHistory');
     const {client} = start();
-    assert.equal(await client.history(), null, 'not running yet');
     globalThis.FAKE_BUS.appear();
     await tick();
-    globalThis.FAKE_BUS.callError = new GLib.Error('Unknown method GetHistory');
-    assert.equal(await client.history(), null);
+    await tick();
+    assert.equal(client.state, 'running');
+    assert.deepEqual(client.historyView().ages, []);
 });
