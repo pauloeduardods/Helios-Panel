@@ -24,7 +24,7 @@ import {
 } from '../layout.js';
 import {
     EFFECTS_WITH_COLOR, EFFECTS_WITH_DIRECTION, LIGHT_COLORS, Level, barPieces, batteryStateLabel,
-    daemonMessage, effectLabel, formatClock, formatDuration, formatPercent, formatTemp, formatWatts,
+    daemonMessage, effectLabel, formatClock, formatDuration, formatMemory, formatPercent, formatTemp, formatWatts,
     keyboardRequest, lightingError, logoModeLabel, logoRequest, parseColor, pickCpu, pickGpu, powerSummary,
     profileLabel, setProfileError, sparklinePieces, tempLevel, usageSummary,
 } from '../model.js';
@@ -270,6 +270,7 @@ class HeliosIndicator extends PanelMenu.Button {
             cpu: this._graphRow('CPU', 'cpu-usage'),
             clock: makeInfoRow('CPU clock'),
             gpu: this._graphRow('GPU', 'gpu-usage'),
+            ram: this._graphRow('RAM', 'memory-usage'),
         };
         for (const row of Object.values(this._usageRows))
             this._usageMenu.menu.addMenuItem(row.item);
@@ -557,6 +558,7 @@ class HeliosIndicator extends PanelMenu.Button {
         show(rows.cpu, usage.cpu === null ? null : formatPercent(usage.cpu));
         show(rows.clock, formatClock(usage));
         show(rows.gpu, usage.gpu === null ? null : formatPercent(usage.gpu));
+        show(rows.ram, formatMemory(usage));
         this._usageMenu.visible = Object.values(rows).some(r => r.item.visible);
         this._usageMenu.label.text = usageSummary(usage);
     }

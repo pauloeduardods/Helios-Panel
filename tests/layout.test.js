@@ -52,7 +52,7 @@ function snapshot({gpu = ['nvidia-smi', 'on', true, 47], source = 'battery', bat
     return {
         state: 'running',
         sensors: sensorsFromDbus({Cpu: ['cpu', true, 61.4], Gpu: gpu, Fans: fans, Temperatures: []}),
-        usage: usageFromDbus({CpuUsage: [true, 23], CpuFrequency: [true, 1.44, 3.8], GpuUsage: [true, 9], ...usage}),
+        usage: usageFromDbus({CpuUsage: [true, 23], CpuFrequency: [true, 1.44, 3.8], GpuUsage: [true, 9], Memory: [true, 40, 12.4, 31.1], ...usage}),
         power: powerFromDbus({
             GpuPower: [true, 6.25], CpuPower: [true, 12.3], PowerSource: source,
             Battery: battery ?? ['BAT1', source === 'battery' ? 'discharging' : 'not-charging', 80, 24.46, 92, 0, 172],
@@ -93,6 +93,9 @@ test('every reading renders, with simple decimals', () => {
     assert.equal(text('{cpu}°/{gpu}°'), '61°/47°');
     assert.equal(text('{cpu:1}'), '61.4');
     assert.equal(text('{cpu-usage}% {gpu-usage}%'), '23% 9%');
+    assert.equal(text('{ram}%'), '40%');
+    assert.equal(text('{ram-used}/{ram-total} GiB'), '12.4/31.1 GiB');
+    assert.equal(text('{ram-used:0} of {ram-total:0} GiB'), '12 of 31 GiB');
     assert.equal(text('{cpu-watts} W · {gpu-watts:0} W'), '12.3 W · 6 W');
     assert.equal(text('{watts} W · {battery}%'), '24.5 W · 80%');
     assert.equal(text('{power}'), '24.5 W');
@@ -324,7 +327,8 @@ test('segment icon and graph settings', () => {
     assert.equal(layout.segments[0].graph.color, '#ff0000');
     layout = setSegment(layout, 0, {graph: null});
     assert.equal(layout.segments[0].graph, null);
-    assert.deepEqual(GRAPH_READINGS, ['cpu', 'gpu', 'cpu-usage', 'gpu-usage', 'cpu-watts', 'power', 'watts']);
+    assert.deepEqual(GRAPH_READINGS,
+        ['cpu', 'gpu', 'cpu-usage', 'gpu-usage', 'cpu-watts', 'power', 'watts', 'ram', 'ram-used']);
 });
 
 // ---- rendering ------------------------------------------------------------------------------

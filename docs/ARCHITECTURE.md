@@ -67,6 +67,7 @@ crates/
 │   ├── src/nvidia.rs        PCI lookup, runtime-PM gate, query interval
 │   ├── src/power.rs         power source, laptop battery, averaged draw
 │   ├── src/cpu.rs           CPU usage from /proc/stat, clock from cpufreq
+│   ├── src/memory.rs        RAM in use from /proc/meminfo
 │   ├── src/history.rs       in-memory ring buffer of the last 5 min for the sparklines
 │   ├── src/rapl.rs          CPU package draw from the RAPL counter, 2 s minimum window
 │   ├── src/profile.rs       platform profile state, validation, write path
@@ -153,6 +154,7 @@ heliosctl doctor [--json]   diagnosis, read-only, prints suggested commands
   "cpu": {"sensor": "hwmon:coretemp/Package id 0", "celsius": 61.0},
   "gpu": {"source": "nvidia-smi", "state": "off", "celsius": null, "watts": null},
   "fans": [{"label": "Fan 1", "rpm": 2350}, {"label": "Fan 2", "rpm": 2600}],
+  "memory": {"used_gib": 12.4, "total_gib": 31.1, "usage_percent": 40.0},
   "power": {"source": "ac",
             "battery": {"name": "BAT1", "state": "not-charging", "percent": 80.0, "watts": 0.0,
                         "health_percent": 92.0, "cycles": 0, "minutes_left": null}},
@@ -184,7 +186,7 @@ All properties are read-only and emit `org.freedesktop.DBus.Properties.Propertie
 | Member | Type | Meaning |
 |---|---|---|
 | `Version` | `s` | heliosd version, e.g. `0.2.0` |
-| `ApiVersion` | `u` | `7`; raised for compatible additions (2 added `GpuPower`, `PowerSource`, `Battery`; 3 added `CpuPower`; 4 added `CpuUsage`, `CpuFrequency`, `GpuUsage`, `Devices`; 5 added `GetHistory`; 6 added the `Lighting` interface; 7 added the logo mode, which changed `Logo` and `SetLogo`) |
+| `ApiVersion` | `u` | `8`; raised for compatible additions (2 added `GpuPower`, `PowerSource`, `Battery`; 3 added `CpuPower`; 4 added `CpuUsage`, `CpuFrequency`, `GpuUsage`, `Devices`; 5 added `GetHistory`; 6 added the `Lighting` interface; 7 added the logo mode, which changed `Logo` and `SetLogo`; 8 added `Memory` and the `memory-usage` history series) |
 
 ### `io.github.pauloeduardods.Helios1.Sensors`
 
@@ -198,11 +200,12 @@ All properties are read-only and emit `org.freedesktop.DBus.Properties.Propertie
 | `CpuPower` | `(bd)` | (valid, W): CPU package draw from RAPL, averaged over at least 2 s and rounded to 0.1 W (PLATYPUS, CVE-2020-8694); invalid until the second read and without RAPL |
 | `CpuUsage` | `(bd)` | (valid, %): all CPUs busy since the previous poll, whole percent; invalid until the second poll |
 | `CpuFrequency` | `(bdd)` | (valid, average GHz, max GHz) across the cpufreq policies, rounded to 0.1 |
+| `Memory` | `(bddd)` | (valid, %, used GiB, total GiB): RAM in use (`MemTotal` − `MemAvailable` from `/proc/meminfo`), whole percent, GiB rounded to 0.1 |
 | `GpuUsage` | `(bd)` | (valid, %): `utilization.gpu` from the same `nvidia-smi` query (only while awake), or `amdgpu` `gpu_busy_percent` |
 | `Devices` | `a(ssd)` | drives and network cards: (kind `storage`/`wifi`, name, °C), sorted by kind then name; a drive's name is its model, so two `nvme` chips are told apart; unreadable sensors are left out |
 | `PowerSource` | `s` | `ac`, `battery` or `unknown` (no system `Mains` supply and the battery is not discharging) |
 | `Battery` | `(ssdddii)` | (name, state `charging`/`discharging`/`full`/`not-charging`/`unknown`, %, W, health %, cycles, minutes left); name `""` = no battery, `-1` = unknown |
-| `GetHistory()` | method → `(ad, a(sabad))` | the last 5 minutes from memory (150 polls at most): ages in seconds before now, oldest first; then per series (name, valid flags, values) aligned with them. Series: `cpu-celsius`, `gpu-celsius`, `cpu-usage`, `gpu-usage`, `cpu-watts`, `battery-watts` (only while discharging). The extension calls it once per connection and then appends each `Sensors` update to its own copy, which the menu and top-bar graphs draw. |
+| `GetHistory()` | method → `(ad, a(sabad))` | the last 5 minutes from memory (150 polls at most): ages in seconds before now, oldest first; then per series (name, valid flags, values) aligned with them. Series: `cpu-celsius`, `gpu-celsius`, `cpu-usage`, `gpu-usage`, `cpu-watts`, `battery-watts` (only while discharging), `memory-usage`. The extension calls it once per connection and then appends each `Sensors` update to its own copy, which the menu and top-bar graphs draw. |
 
 The `valid` flag replaces NaN sentinels, so every frontend, including JSON-based
 ones, gets an explicit "no value".
@@ -427,15 +430,15 @@ so the preview matches the bar.
 
 - `items`: readings (`cpu`, `gpu`, `cpu-usage`, `gpu-usage`, `cpu-watts`,
   `gpu-watts`, `fan`, `power`, `watts`, `battery`, `time-left`, `profile`,
-  `clock`, `clock-max`). When a segment has a template, its items are the
+  `clock`, `clock-max`, `ram`, `ram-used`, `ram-total`). When a segment has a template, its items are the
   readings the template uses.
 - `template`: `{name}` or `{name:N}` (N decimals, 0–2); `{{` and `}}` are
   literal braces; `{fan1}`, `{fan2}`… are single fans. Empty means the items'
   own templates joined by ` · `, leaving out readings the machine lacks.
-- `icon`: `auto` (the first reading's), `none`, or `cpu`, `gpu`, `fan`,
-  `power`, `profile`.
+- `icon`: `auto` (the first reading's), `none`, or `cpu`, `gpu`, `memory`,
+  `fan`, `power`, `profile`.
 - `graph`: `null` or one reading with a history (`cpu`, `gpu`, `cpu-usage`,
-  `gpu-usage`, `cpu-watts`, `power`, `watts`), `kind` `line`/`area`/`bars`,
+  `gpu-usage`, `cpu-watts`, `power`, `watts`, `ram`, `ram-used`), `kind` `line`/`area`/`bars`,
   `only` (hide the text), `width` `narrow`/`medium`/`wide`, `window` 60–300 s,
   `color` `follow` (temperature colors) or a color.
 

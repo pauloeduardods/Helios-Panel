@@ -103,18 +103,22 @@ export function sensorsFromDbus({Cpu, Gpu, Fans, Temperatures, Devices} = {}) {
 }
 
 /**
- * CPU and GPU usage and the CPU clock (API v4); null when unknown or when
- * heliosd is older.
+ * CPU and GPU usage and the CPU clock (API v4), RAM in use (API v8); null
+ * when unknown or when heliosd is older.
  */
-export function usageFromDbus({CpuUsage, CpuFrequency, GpuUsage} = {}) {
+export function usageFromDbus({CpuUsage, CpuFrequency, GpuUsage, Memory} = {}) {
     const [cpuValid = false, cpu = 0] = CpuUsage ?? [];
     const [freqValid = false, averageGhz = 0, maxGhz = 0] = CpuFrequency ?? [];
     const [gpuValid = false, gpu = 0] = GpuUsage ?? [];
+    const [ramValid = false, ram = 0, ramUsedGib = 0, ramTotalGib = 0] = Memory ?? [];
     return {
         cpu: cpuValid ? cpu : null,
         gpu: gpuValid ? gpu : null,
         averageGhz: freqValid ? averageGhz : null,
         maxGhz: freqValid ? maxGhz : null,
+        ram: ramValid ? ram : null,
+        ramUsedGib: ramValid ? ramUsedGib : null,
+        ramTotalGib: ramValid ? ramTotalGib : null,
     };
 }
 
@@ -147,11 +151,12 @@ const SPARKLINE_MIN_RANGE = Object.freeze({
     'gpu-usage': 20,
     'cpu-watts': 5,
     'battery-watts': 5,
+    'memory-usage': 20,
 });
 
 /** The series heliosd keeps, in its order. */
 export const HISTORY_SERIES = Object.freeze([
-    'cpu-celsius', 'gpu-celsius', 'cpu-usage', 'gpu-usage', 'cpu-watts', 'battery-watts',
+    'cpu-celsius', 'gpu-celsius', 'cpu-usage', 'gpu-usage', 'cpu-watts', 'battery-watts', 'memory-usage',
 ]);
 
 /** heliosd keeps 150 samples; so does the local copy. */
@@ -210,6 +215,7 @@ export function historySample({sensors, usage, power}) {
         'gpu-usage': usage.gpu,
         'cpu-watts': power.cpuWatts,
         'battery-watts': battery?.state === 'discharging' ? battery.watts : null,
+        'memory-usage': usage.ram ?? null,
     };
 }
 
@@ -277,7 +283,7 @@ export function sparklinePieces(history, name, width, height,
 }
 
 /** Series in percent: their bars always span 0–100 %. */
-const PERCENT_SERIES = Object.freeze(['cpu-usage', 'gpu-usage']);
+const PERCENT_SERIES = Object.freeze(['cpu-usage', 'gpu-usage', 'memory-usage']);
 
 /**
  * A bar graph in a width × height box (y grows down): the window is split
@@ -403,6 +409,13 @@ export function formatClock(usage) {
     return `${usage.averageGhz.toFixed(1)} GHz · max ${usage.maxGhz.toFixed(1)} GHz`;
 }
 
+/** "12.4 / 31.1 GiB · 40%", or null without a reading. */
+export function formatMemory(usage) {
+    if (usage.ram === null || usage.ramUsedGib === null || usage.ramTotalGib === null)
+        return null;
+    return `${usage.ramUsedGib.toFixed(1)} / ${usage.ramTotalGib.toFixed(1)} GiB · ${formatPercent(usage.ram)}`;
+}
+
 /** -1 (heliosd's "unknown") and garbage become null. */
 function known(value) {
     return Number.isFinite(value) && value >= 0 ? value : null;
@@ -476,13 +489,15 @@ export function powerPanelText(power) {
     }
 }
 
-/** The title of the collapsed Usage menu: "Usage · CPU 23% · GPU 4%". */
+/** The title of the collapsed Usage menu: "Usage · CPU 23% · GPU 4% · RAM 40%". */
 export function usageSummary(usage) {
     const parts = ['Usage'];
     if (usage.cpu !== null)
         parts.push(`CPU ${formatPercent(usage.cpu)}`);
     if (usage.gpu !== null)
         parts.push(`GPU ${formatPercent(usage.gpu)}`);
+    if ((usage.ram ?? null) !== null)
+        parts.push(`RAM ${formatPercent(usage.ram)}`);
     return parts.join(' · ');
 }
 

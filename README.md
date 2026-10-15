@@ -7,7 +7,7 @@ Laptop sensors and the platform profile for Linux, with a GNOME Shell top-bar ex
 - optionally, the **fan** speed;
 - optionally, the **power draw** while on battery (a dimmed `AC` when plugged in).
 
-The menu also shows each NVMe or SATA drive's temperature by model name, the Wi-Fi card's temperature, CPU and GPU usage, the CPU clock (average and fastest core), the battery charge and state, the time left, the battery health (full capacity against the design capacity) the CPU package draw and the NVIDIA GPU's power draw.
+The menu also shows each NVMe or SATA drive's temperature by model name, the Wi-Fi card's temperature, CPU and GPU usage, RAM in use (GiB of the total and percent), the CPU clock (average and fastest core), the battery charge and state, the time left, the battery health (full capacity against the design capacity) the CPU package draw and the NVIDIA GPU's power draw.
 
 It was built for the Acer Predator Helios Neo 16 (PHN16-72), but it works on any PC with sensors in `/sys/class/hwmon`, including Ryzen CPUs and Radeon GPUs.
 
@@ -48,7 +48,7 @@ GNOME Shell keeps the extension code it loaded at login, so a new version only s
 To configure it, open the extension menu → **Settings**, or run `gnome-extensions prefs helios-panel@paulo`. The **Layout** page decides what the top bar shows, with a live preview (heliosd's current values, or sample values when it is not running):
 
 - **Segments**: each one has one icon and one text. Put several readings in one segment to merge them, e.g. `61°/47° · 24.5 W · Turbo`; reorder, add and remove segments.
-- **Templates**: a segment's text, e.g. `{cpu}°/{gpu}°` or `{watts} W · {battery}%`. Placeholders give the bare number, so the template adds the unit: `{cpu}` `{gpu}` (°C), `{cpu-usage}` `{gpu-usage}` (%), `{cpu-watts}` `{gpu-watts}` `{watts}` (battery draw, W), `{power}` (draw with its unit, or `AC`), `{battery}` (%), `{time-left}` (h:mm), `{profile}`, `{clock}` `{clock-max}` (GHz), `{fan}` (all fans) and `{fan1}`, `{fan2}`…; add `:1` for one decimal (`{cpu:1}`). A mistake never breaks the bar: that part shows `--`. A unit glued to a reading (`°`, `%`, ` W`) is left out when the reading shows `--` or `off`. With no template, the readings are joined by ` · ` and the ones the machine lacks (no battery, no GPU…) are left out.
+- **Templates**: a segment's text, e.g. `{cpu}°/{gpu}°` or `{watts} W · {battery}%`. Placeholders give the bare number, so the template adds the unit: `{cpu}` `{gpu}` (°C), `{cpu-usage}` `{gpu-usage}` (%), `{cpu-watts}` `{gpu-watts}` `{watts}` (battery draw, W), `{power}` (draw with its unit, or `AC`), `{battery}` (%), `{time-left}` (h:mm), `{profile}`, `{clock}` `{clock-max}` (GHz), `{ram}` (RAM in use, %), `{ram-used}` `{ram-total}` (GiB, one decimal; e.g. `{ram-used}/{ram-total} GiB`), `{fan}` (all fans) and `{fan1}`, `{fan2}`…; add `:1` for one decimal (`{cpu:1}`). A mistake never breaks the bar: that part shows `--`. A unit glued to a reading (`°`, `%`, ` W`) is left out when the reading shows `--` or `off`. With no template, the readings are joined by ` · ` and the ones the machine lacks (no battery, no GPU…) are left out.
 - **Graphs**: any segment can draw the last 1, 2 or 5 minutes of a reading as a **line**, a **filled area** or **bars**, next to its text or alone, following the temperature colors or in one fixed color.
 - **Presets**: Minimal, Default, Gaming (CPU and GPU graphs) and Battery, with Undo.
 - **Import and export** the layout as a JSON file, to back it up or share it.
@@ -95,6 +95,7 @@ What goes where:
 | NVIDIA GPU draw | `nvidia-smi`, in the same query as the temperature |
 | Drives, Wi-Fi | `nvme`, `drivetemp` and `iwlwifi*` hwmon chips; the drive's model from `device/model` |
 | CPU usage | `/proc/stat`, between two reads |
+| RAM | `/proc/meminfo`: in use is `MemTotal` minus `MemAvailable`, as `free` counts it |
 | CPU clock | `/sys/devices/system/cpu/cpufreq/policy*/scaling_cur_freq` |
 | GPU usage | `nvidia-smi` (same query as the temperature) or `amdgpu`'s `gpu_busy_percent` |
 | CPU package draw | RAPL energy counter, `/sys/class/powercap/intel-rapl:N` (Intel and AMD) |
@@ -102,7 +103,7 @@ What goes where:
 
 Reading never needs root, with one exception: the RAPL counter behind the CPU draw is root-only. heliosd already runs as root and owns the file, so it needs no extra privilege, and it publishes that draw only as an average over at least 2 seconds rounded to 0.1 W (see below). `heliosctl status` run as a normal user shows no CPU draw. heliosd reads everything once every 2 seconds for all clients, and clients are told only when something changes.
 
-heliosd also keeps the last 5 minutes of CPU and GPU temperature, CPU and GPU usage, the CPU draw and the battery draw in memory (150 samples each, never written to disk). The menu draws them as small graphs under each value, and the top bar can too (see below). The extension asks heliosd for them once when it connects and then adds the values heliosd already sends, so the graphs cost no extra calls.
+heliosd also keeps the last 5 minutes of CPU and GPU temperature, CPU, GPU and RAM usage, the CPU draw and the battery draw in memory (150 samples each, never written to disk). The menu draws them as small graphs under each value, and the top bar can too (see below). The extension asks heliosd for them once when it connects and then adds the values heliosd already sends, so the graphs cost no extra calls.
 
 ### Why the CPU draw is coarse
 
