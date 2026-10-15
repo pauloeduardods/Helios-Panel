@@ -22,7 +22,7 @@
 - Linux cannot reach these methods from user space, and mainline `acer-wmi`
   (checked against the current tree) does not implement keyboard RGB. Helios
   therefore needs a kernel module. The recommendation is a **small module of
-  our own** that binds only to this WMI device, calls only the four lighting
+  our own** that binds only to this WMI device, calls only the lighting
   methods, and coexists with the mainline `acer_wmi` driver, instead of
   replacing `acer_wmi` with a fork.
 - heliosd gets a `Lighting` D-Bus interface behind a new polkit action, and
@@ -154,7 +154,7 @@ Until then, logo support stays out of the D-Bus API.
 | Mainline `acer-wmi` | has no keyboard RGB | not available |
 | predator-sense `facer.ko` / `linuwu_sense.ko` | forks of the whole `acer_wmi` driver: they **replace** it (mainline must be blacklisted) and add fan, EC-raw-mode and battery code | rejected: replaces the driver behind the platform profile, far beyond our scope |
 | `acpi_call` | lets user space run any ACPI method | rejected: an arbitrary-firmware-call interface |
-| **New module `helios-acer-lighting`** | a WMI driver bound to `7A4DDFE7-…` that coexists with mainline `acer_wmi` and only implements methods 6, 7, 20 and 21 | **recommended** |
+| **New module `helios-acer-lighting`** | a WMI driver bound to `7A4DDFE7-…` that coexists with mainline `acer_wmi` and only implements the lighting methods it needs | **chosen** |
 | Upstream (`acer-wmi` LED class) | the long-term home | later: propose upstream once ours is proven |
 
 ### The module
@@ -425,8 +425,8 @@ back to 0, its original value.
 | Risk | Mitigation |
 |---|---|
 | A wrong value reaches the EC | validated in helios-core, again in heliosd and again in the kernel module; the firmware itself rejects unknown zone masks |
-| Calling the wrong method | the module only contains methods 6, 7, 20 and 21; fans, misc settings, the MUX and raw EC are impossible by construction |
-| Byte 9 side effect (keyboard sync) | always sent as exactly 1, enforced and tested at every layer |
+| Calling the wrong method | the module only contains methods 4 (read only), 12, 13, 20 and 21; fans, misc settings, the turbo LED, the MUX and raw EC are impossible by construction |
+| Byte 9 side effect (keyboard sync) | always sent as exactly 1 for the keyboard, or 2 for the logo's power; enforced and tested at every layer |
 | Breaking the platform profile | mainline `acer_wmi` stays untouched; the module only adds a driver for a GUID nothing else binds |
 | Running on another model | DMI allow-list in the module |
 | A boot problem from the module | it is an ordinary loadable module, not in the initramfs, not loaded by Helios; `sudo modprobe -r helios_acer_lighting` or `dkms remove` undoes it |
