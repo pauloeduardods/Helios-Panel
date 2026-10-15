@@ -384,3 +384,46 @@ int hal_state_show(const struct hal_fw *fw, char *buf)
 	put_hex(&l, effect[9]);
 	return finish(&l);
 }
+
+/* Method 2 with the keyboard or logo selector; returns a status byte. */
+static int set_state(const struct hal_fw *fw, const u8 *in)
+{
+	return set(fw, HAL_SET_STATE, in, HAL_SET_STATE_IN);
+}
+
+static int parse_bit(const char *buf, size_t len, u8 *bit)
+{
+	struct tokens t;
+
+	if (split(buf, len, &t, 1) || parse_uint(t.word[0], t.len[0], 1, bit))
+		return -EINVAL;
+	return 0;
+}
+
+int hal_keyboard_state_store(const struct hal_fw *fw, const char *buf, size_t len)
+{
+	u8 in[HAL_SET_STATE_IN] = { 0 };
+	u8 bit;
+
+	if (parse_bit(buf, len, &bit))
+		return -EINVAL;
+	in[0] = STATE_KEYBOARD;
+	in[5] = bit;
+	return set_state(fw, in);
+}
+
+int hal_logo_state_store(const struct hal_fw *fw, const char *buf, size_t len)
+{
+	u8 in[HAL_SET_STATE_IN] = { 0 };
+	size_t i;
+	u8 bit;
+
+	if (parse_bit(buf, len, &bit))
+		return -EINVAL;
+	/* The firmware only accepts 0xF0/0xF1 followed by seven 0xFF bytes. */
+	in[0] = STATE_LOGO;
+	in[6] = (u8)(0xf0 | bit);
+	for (i = 7; i <= 13; i++)
+		in[i] = 0xff;
+	return set_state(fw, in);
+}

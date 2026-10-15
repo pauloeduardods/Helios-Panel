@@ -158,6 +158,25 @@ static void check_invariants(void)
 			CHECK(c->in_len == HAL_GET_ZONE_IN && c->in[1] == 0 && c->in[2] == 0 &&
 			      c->in[3] == 0, "method 7 input");
 			break;
+		case HAL_SET_STATE:
+			CHECK(c->in_len == HAL_SET_STATE_IN, "method 2 size");
+			if (c->in[0] == 0x08) {
+				CHECK(c->in[5] <= 1, "KBST value %u", c->in[5]);
+				for (int b = 1; b < 16; b++)
+					CHECK(b == 5 || c->in[b] == 0, "method 2 byte %d is %u",
+					      b, c->in[b]);
+			} else if (c->in[0] == 0x10) {
+				CHECK(c->in[6] == 0xf0 || c->in[6] == 0xf1, "LBST value 0x%02x",
+				      c->in[6]);
+				for (int b = 1; b < 16; b++) {
+					u8 want = b == 6 ? c->in[6] : (b >= 7 && b <= 13) ? 0xff : 0;
+
+					CHECK(c->in[b] == want, "method 2 byte %d is 0x%02x", b, c->in[b]);
+				}
+			} else {
+				fail("method 2 selector 0x%02x", c->in[0]);
+			}
+			break;
 		case HAL_GET_STATE:
 			CHECK(c->in_len == HAL_GET_STATE_IN, "method 4 size");
 			CHECK(c->in[0] == 0x08 || c->in[0] == 0x10, "method 4 selector 0x%02x",
@@ -422,6 +441,48 @@ static void test_state_show(void)
 	CHECK(fake.count == 2, "kept reading after a failure");
 }
 
+/* ------------------------------------------------ keyboard_state, logo_state */
+
+static void test_state_store(void)
+{
+	static const char *const bad[] = {
+		"", "\n", "2", "01", "00", "-1", "+1", "on", "1 1", " 1", "1 ", "0xf1", "f1",
+	};
+	const u8 kb_on[16] = { 0x08, 0, 0, 0, 0, 1 };
+	const u8 logo_on[16] = { 0x10, 0, 0, 0, 0, 0, 0xf1, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+				 0xff };
+	const u8 logo_off[16] = { 0x10, 0, 0, 0, 0, 0, 0xf0, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+				  0xff };
+
+	reset();
+	CHECK(hal_keyboard_state_store(&fw, "1\n", 2) == 0, "keyboard 1 rejected");
+	CHECK(fake.count == 1 && fake.calls[0].method == HAL_SET_STATE, "one method 2 call");
+	check_bytes(&fake.calls[0], kb_on, 16, "KBST 1");
+	reset();
+	CHECK(hal_keyboard_state_store(&fw, "0", 1) == 0 && fake.calls[0].in[5] == 0, "keyboard 0");
+
+	reset();
+	CHECK(hal_logo_state_store(&fw, "1", 1) == 0, "logo 1 rejected");
+	check_bytes(&fake.calls[0], logo_on, 16, "LBST on");
+	reset();
+	CHECK(hal_logo_state_store(&fw, "0\n", 2) == 0, "logo 0 rejected");
+	check_bytes(&fake.calls[0], logo_off, 16, "LBST off");
+	check_invariants();
+
+	for (size_t i = 0; i < ARRAY_SIZE(bad); i++) {
+		current = bad[i];
+		reset();
+		CHECK(hal_keyboard_state_store(&fw, bad[i], strlen(bad[i])) == -EINVAL, "keyboard accepted");
+		CHECK(hal_logo_state_store(&fw, bad[i], strlen(bad[i])) == -EINVAL, "logo accepted");
+		CHECK(fake.count == 0, "reached the firmware");
+	}
+	current = "state store";
+
+	reset();
+	fake.fail_at = 1;
+	CHECK(hal_logo_state_store(&fw, "1", 1) == -EIO, "bad status not reported");
+}
+
 /* --------------------------------------------------------------- fuzzing */
 
 /*
@@ -448,10 +509,19 @@ static void test_fuzz(void)
 			len += (size_t)snprintf(line + len, sizeof(line) - len, w ? " %s" : "%s", word);
 		}
 		reset();
-		if (round & 1)
+		switch (round % 4) {
+		case 0:
 			hal_effect_store(&fw, line, len);
-		else
+			break;
+		case 1:
 			hal_zones_store(&fw, line, len);
+			break;
+		case 2:
+			hal_keyboard_state_store(&fw, line, len);
+			break;
+		default:
+			hal_logo_state_store(&fw, line, len);
+		}
 		check_invariants();
 		if (failures)
 			return;
@@ -475,6 +545,7 @@ int main(void)
 		{ "zones stop at first error", test_zones_stop_at_first_error },
 		{ "zones show", test_zones_show },
 		{ "state show", test_state_show },
+		{ "state store", test_state_store },
 		{ "fuzz", test_fuzz },
 	};
 	size_t n = ARRAY_SIZE(tests);

@@ -107,7 +107,7 @@ the firmware's own ASL.
 
 | Method | What the firmware does | Why it is excluded |
 |---|---|---|
-| 2 | turbo-key LED (`TKST`), keyboard on/off (`KBST`), `LB` state (`LBST`) | it overlaps with the turbo key; not needed (its read-only counterpart, method 4, is used for diagnosis) |
+| 2, selector `0x01` | turbo-key LED (`TKST`) | not lighting. Selectors `0x08` (`KBST`) and `0x10` (`LBST`) are used since 0.1.3, see [the hardware results](#hardware-test-results) |
 | 10–13 | other `LB*` fields (`LBET`, `LBLR/G/B`, `LBLT`, `LBLF`) of unknown meaning | unknown semantics |
 | 14, 16, 22 and the others | fans, misc settings | out of scope: never fans, never the EC beyond lighting |
 
@@ -230,8 +230,8 @@ commands, adapted to what is missing):
 
 ```bash
 sudo apt install dkms linux-headers-$(uname -r)   # if not installed yet
-sudo cp -rT kmod/helios-acer-lighting /usr/src/helios-acer-lighting-0.1.2
-sudo dkms install helios-acer-lighting/0.1.2
+sudo cp -rT kmod/helios-acer-lighting /usr/src/helios-acer-lighting-0.1.3
+sudo dkms install helios-acer-lighting/0.1.3
 ```
 
 Then, with Secure Boot **off**, or **on with the DKMS key already
@@ -367,6 +367,19 @@ reads, through method 4 (which only reads EC registers, see the ASL), the
 keyboard state `KBST` and the logo state `LBST`, plus `KLES` from method 21:
 `kbst=0xNN lbst=0xNN kles=0xNN`. Method 2, which writes `KBST`, `LBST` and
 the turbo-key LED, is still never called.
+
+It read `kbst=0x00 lbst=0xf0 kles=0x03` with the wave running and with the
+static zones dark alike. Method 2 accepts only `0xF0`, `0xF1`, `0xF4` and
+`0xF5` for `LBST`, which suggests bit 0 is on/off: the logo is off, which
+matches it staying dark on Linux. `KBST = 0` may likewise turn off the
+static backlight while the animated effects ignore it.
+
+Module 0.1.3 (approved on 2026-10-14) adds two write-only, root-only
+attributes for the next test, through method 2 with exactly two selectors:
+`keyboard_state` writes `KBST` = 0 or 1 (selector `0x08`, byte 5), and
+`logo_state` writes `LBST` = `0xF0` or `0xF1` (selector `0x10`, byte 6,
+then the seven `0xFF` bytes the firmware requires). Selector `0x01`, the
+turbo-key LED, is never sent; the tests check every method 2 call.
 
 ## Safety summary
 
