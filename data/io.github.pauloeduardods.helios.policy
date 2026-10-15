@@ -16,4 +16,15 @@
       <allow_active>yes</allow_active>
     </defaults>
   </action>
+
+  <!-- The keyboard effect and the lid logo: the worst case is a wrong colour. -->
+  <action id="io.github.pauloeduardods.helios.set-lighting">
+    <description>Change the keyboard and logo lighting</description>
+    <message>Authentication is required to change the keyboard lighting</message>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>yes</allow_active>
+    </defaults>
+  </action>
 </policyconfig>

@@ -10,6 +10,7 @@ pub mod doctor;
 pub mod history;
 pub mod hwmon;
 pub mod io;
+pub mod lighting;
 pub mod nvidia;
 pub mod power;
 pub mod profile;

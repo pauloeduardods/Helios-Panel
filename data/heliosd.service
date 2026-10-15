@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 [Unit]
-Description=Helios laptop sensors and platform profile daemon
+Description=Helios laptop sensors, platform profile and lighting daemon
 Documentation=https://github.com/pauloeduardods/Helios-Panel
 
 [Service]
@@ -9,8 +9,8 @@ BusName=io.github.pauloeduardods.Helios1
 ExecStart=/usr/local/libexec/heliosd
 Restart=on-failure
 
-# Root only because the platform profile file is root:root 0644. No
-# capabilities: file ownership alone allows that one write.
+# Root only because the platform profile and lighting files are root-owned.
+# No capabilities: file ownership alone allows those writes.
 CapabilityBoundingSet=
 AmbientCapabilities=
 NoNewPrivileges=yes
@@ -27,9 +27,15 @@ ProtectClock=yes
 ProtectHostname=yes
 ProtectProc=invisible
 ProcSubset=all
-# ... except the platform profile (legacy file and the acer-wmi class device).
+# ... except the platform profile (legacy file and the acer-wmi class device),
+# the two files of the helios-acer-lighting module, when it is loaded, and
+# the saved lighting state.
 ReadWritePaths=-/sys/firmware/acpi/platform_profile
 ReadWritePaths=-/sys/devices/platform/acer-wmi/platform-profile
+ReadWritePaths=-/sys/bus/wmi/devices/7A4DDFE7-5B5D-40B4-8595-4408E0CC7F56/keyboard_effect
+ReadWritePaths=-/sys/bus/wmi/devices/7A4DDFE7-5B5D-40B4-8595-4408E0CC7F56/logo
+StateDirectory=heliosd
+StateDirectoryMode=0700
 
 # Devices: only what nvidia-smi needs to read a temperature (already 0666).
 DevicePolicy=closed

@@ -190,6 +190,7 @@ pub const AMD_DESKTOP: &[(&str, &str)] = &[
 pub struct FakeFs {
     files: RefCell<BTreeMap<String, String>>,
     unreadable: BTreeSet<String>,
+    unwritable: BTreeSet<String>,
     writes: RefCell<Vec<(String, String)>>,
 }
 
@@ -210,6 +211,13 @@ impl FakeFs {
     pub fn with_unreadable(mut self, path: &str) -> Self {
         self.files.get_mut().entry(path.to_owned()).or_default();
         self.unreadable.insert(path.to_owned());
+        self
+    }
+
+    /// The file exists but the kernel rejects writes (EINVAL from a driver).
+    pub fn with_unwritable(mut self, path: &str) -> Self {
+        self.files.get_mut().entry(path.to_owned()).or_default();
+        self.unwritable.insert(path.to_owned());
         self
     }
 
@@ -258,6 +266,9 @@ impl SysFs for FakeFs {
     }
 
     fn write(&self, path: &str, value: &str) -> std::io::Result<()> {
+        if self.unwritable.contains(path) {
+            return Err(std::io::Error::from(std::io::ErrorKind::InvalidInput));
+        }
         let mut files = self.files.borrow_mut();
         let Some(slot) = files.get_mut(path) else {
             return Err(std::io::Error::from(std::io::ErrorKind::NotFound));
