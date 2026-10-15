@@ -171,3 +171,23 @@ test('destroy unwatches the name and silences callbacks', async () => {
     globalThis.FAKE_BUS.vanish();
     assert.equal(changes(), before, 'no callbacks after destroy');
 });
+
+test('history() fetches GetHistory and turns it into plain arrays', async () => {
+    const {client} = start();
+    globalThis.FAKE_BUS.appear();
+    await tick();
+    globalThis.FAKE_BUS.replies = {GetHistory: [[2, 0], [['cpu-celsius', [true, true], [60, 61]]]]};
+    assert.deepEqual(await client.history(), {ages: [2, 0], series: {'cpu-celsius': [60, 61]}});
+    const [call] = globalThis.FAKE_BUS.calls;
+    assert.equal(call.method, 'GetHistory');
+    assert.equal(call.iface, `${IFACE}.Sensors`);
+});
+
+test('history() is null when heliosd is older or gone', async () => {
+    const {client} = start();
+    assert.equal(await client.history(), null, 'not running yet');
+    globalThis.FAKE_BUS.appear();
+    await tick();
+    globalThis.FAKE_BUS.callError = new GLib.Error('Unknown method GetHistory');
+    assert.equal(await client.history(), null);
+});

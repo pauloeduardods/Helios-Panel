@@ -273,6 +273,14 @@ impl Harness {
         }
     }
 
+    async fn history(&self) -> (Vec<f64>, Vec<(String, Vec<bool>, Vec<f64>)>) {
+        self.proxy(SENSORS)
+            .await
+            .call("GetHistory", &())
+            .await
+            .unwrap()
+    }
+
     fn read(&self, path: &str) -> String {
         fs::read_to_string(self.root.join(path))
             .unwrap()
@@ -392,7 +400,7 @@ fn properties_reflect_the_sysfs_tree() {
             ]
         );
 
-        assert_eq!(h.get::<u32>(DAEMON, "ApiVersion").await, 4);
+        assert_eq!(h.get::<u32>(DAEMON, "ApiVersion").await, 5);
         assert_eq!(
             h.get::<String>(DAEMON, "Version").await,
             env!("CARGO_PKG_VERSION")
@@ -602,6 +610,31 @@ fn cpu_usage_is_published_once_proc_stat_moves() {
         h.write("proc/stat", "cpu  1100 0 630 9750 220 0 0 0 0 0\n");
         let usage = h.wait_for(SENSORS, "CpuUsage", |u: &(bool, f64)| u.0).await;
         assert_eq!(usage, (true, 23.0));
+    });
+}
+
+#[test]
+fn history_grows_with_every_poll() {
+    async_io::block_on(async {
+        let h = Harness::start(Polkit::Allow).await;
+        h.write(CPU_TEMP, "70000\n");
+        // heliosd polls every 100 ms here.
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let (ages, series) = loop {
+            let (ages, series) = h.history().await;
+            if series[0].2.last() == Some(&70.0) {
+                break (ages, series);
+            }
+            assert!(Instant::now() < deadline, "history never saw 70 °C");
+            Timer::after(Duration::from_millis(50)).await;
+        };
+        assert!(ages.len() >= 2, "the startup poll and at least one more");
+        assert!(ages.windows(2).all(|w| w[0] >= w[1]), "oldest first");
+        let (name, valid, values) = &series[0];
+        assert_eq!(name, "cpu-celsius");
+        assert_eq!(valid.len(), ages.len());
+        assert_eq!(values.first(), Some(&61.0), "the startup poll");
+        assert_eq!(series[1].1.iter().filter(|v| **v).count(), 0, "GPU asleep");
     });
 }
 

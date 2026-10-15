@@ -6,6 +6,7 @@
 //   proxies[iface]              the proxies the client created
 //   calls                       method calls made through any proxy
 //   callError                   GLib.Error the next call fails with
+//   replies[method]             what a method call returns (unpacked)
 //   failProxies                 make proxy creation fail
 import GLib from './GLib.mjs';
 
@@ -43,13 +44,14 @@ class FakeProxy {
         bus.calls.push({iface: this.iface, method, params, timeout});
         const error = bus.callError;
         bus.callError = null;
-        queueMicrotask(() => callback(this, {error}));
+        const reply = bus.replies?.[method];
+        queueMicrotask(() => callback(this, {error, reply}));
     }
 
     call_finish(result) {
         if (result.error)
             throw result.error;
-        return null;
+        return result.reply === undefined ? null : new GLib.Variant('?', result.reply);
     }
 }
 

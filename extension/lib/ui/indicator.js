@@ -2,7 +2,8 @@
 // The top-bar button: compact readings in the panel, details and the profile
 // switcher in its menu. Everything comes from heliosd through HeliosClient;
 // this file only renders. It has no timers: it redraws when heliosd reports
-// a change or a setting changes.
+// a change or a setting changes. The sparklines fetch the history only while
+// the menu is open.
 
 import GObject from 'gi://GObject';
 import Gio from 'gi://Gio';
@@ -17,7 +18,7 @@ import {HeliosClient} from '../client.js';
 import {
     Level, batteryStateLabel, daemonMessage, formatClock, formatDuration, formatPercent, formatRpm,
     formatTemp, formatWatts, pickCpu, pickGpu, powerPanelText, profileColor, profileLabel,
-    setProfileError, tempLevel,
+    setProfileError, sparklineSegments, tempLevel,
 } from '../model.js';
 
 function makeSegment(iconPath) {
@@ -43,6 +44,36 @@ function makeInfoRow(title) {
     return {item, name, value};
 }
 
+/** A small line graph under a menu row; `segments(width, height)` draws it. */
+function makeSparkline(segments) {
+    const item = new PopupMenu.PopupBaseMenuItem({
+        reactive: false, can_focus: false, style_class: 'helios-sparkline-item',
+    });
+    const area = new St.DrawingArea({style_class: 'helios-sparkline', x_expand: true});
+    area.connect('repaint', () => {
+        const cr = area.get_context();
+        const [width, height] = area.get_surface_size();
+        const c = area.get_theme_node().get_foreground_color();
+        cr.setSourceRGBA(c.red / 255, c.green / 255, c.blue / 255, 0.7);
+        cr.setLineWidth(1.5);
+        for (const run of segments(width, height)) {
+            const [[x0, y0], ...rest] = run;
+            if (rest.length === 0) {
+                cr.rectangle(x0 - 1, y0 - 1, 2, 2); // a lone reading between gaps
+                cr.fill();
+                continue;
+            }
+            cr.moveTo(x0, y0);
+            for (const [x, y] of rest)
+                cr.lineTo(x, y);
+            cr.stroke();
+        }
+        cr.$dispose();
+    });
+    item.add_child(area);
+    return {item, area};
+}
+
 export const HeliosIndicator = GObject.registerClass(
 class HeliosIndicator extends PanelMenu.Button {
     _init(extension) {
@@ -55,9 +86,17 @@ class HeliosIndicator extends PanelMenu.Button {
         this._fanRows = [];
         this._deviceKey = '';
         this._deviceRows = [];
+        this._history = null;
+        this._sparks = [];
+        this._historyBusy = false;
+        this._historyAgain = false;
 
         this._buildPanel();
         this._buildMenu();
+        this.menu.connect('open-state-changed', (_menu, open) => {
+            if (open)
+                this._refreshHistory();
+        });
 
         this._settingsId = this._settings.connect('changed', (_s, key) => {
             if (key === 'profile-names')
@@ -110,7 +149,9 @@ class HeliosIndicator extends PanelMenu.Button {
         this._rowCpu = makeInfoRow('CPU');
         this._rowGpu = makeInfoRow('GPU');
         this._readingsSection.addMenuItem(this._rowCpu.item);
+        this._addSparkline(this._readingsSection, 'cpu-celsius', this._rowCpu);
         this._readingsSection.addMenuItem(this._rowGpu.item);
+        this._addSparkline(this._readingsSection, 'gpu-celsius', this._rowGpu);
         this._deviceSection = new PopupMenu.PopupMenuSection();
         this._readingsSection.addMenuItem(this._deviceSection);
         this._fanSection = new PopupMenu.PopupMenuSection();
@@ -124,8 +165,12 @@ class HeliosIndicator extends PanelMenu.Button {
             clock: makeInfoRow('CPU clock'),
             gpu: makeInfoRow('GPU'),
         };
-        for (const row of Object.values(this._usageRows))
+        const usageSeries = {cpu: 'cpu-usage', gpu: 'gpu-usage'};
+        for (const [key, row] of Object.entries(this._usageRows)) {
             this._usageSection.addMenuItem(row.item);
+            if (usageSeries[key])
+                this._addSparkline(this._usageSection, usageSeries[key], row);
+        }
         this.menu.addMenuItem(this._usageSection);
 
         this._powerSection = new PopupMenu.PopupMenuSection();
@@ -139,8 +184,12 @@ class HeliosIndicator extends PanelMenu.Button {
             gpu: makeInfoRow('GPU draw'),
             health: makeInfoRow('Battery health'),
         };
-        for (const row of Object.values(this._powerRows))
+        const powerSeries = {draw: 'battery-watts', cpu: 'cpu-watts'};
+        for (const [key, row] of Object.entries(this._powerRows)) {
             this._powerSection.addMenuItem(row.item);
+            if (powerSeries[key])
+                this._addSparkline(this._powerSection, powerSeries[key], row);
+        }
         this.menu.addMenuItem(this._powerSection);
 
         this._profileHeader = new PopupMenu.PopupSeparatorMenuItem('Power Profile');
@@ -150,6 +199,44 @@ class HeliosIndicator extends PanelMenu.Button {
 
         this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
         this.menu.addAction('Settings', () => this._ext.openPreferences());
+    }
+
+    _addSparkline(section, series, row) {
+        const spark = makeSparkline((w, h) => sparklineSegments(this._history, series, w, h));
+        spark.item.visible = false;
+        section.addMenuItem(spark.item);
+        this._sparks.push({...spark, series, row});
+    }
+
+    // ---------------------------------------------------------------- history
+
+    /** Fetches the history; a request made while one is running runs after it. */
+    async _refreshHistory() {
+        if (this._historyBusy) {
+            this._historyAgain = true;
+            return;
+        }
+        this._historyBusy = true;
+        do {
+            this._historyAgain = false;
+            const history = await this._client?.history();
+            if (!this._client)
+                return; // destroyed meanwhile
+            this._history = history ?? null;
+            this._renderSparklines();
+        } while (this._historyAgain);
+        this._historyBusy = false;
+    }
+
+    /** A graph shows under its row once it has two readings to join. */
+    _renderSparklines() {
+        for (const {item, area, series, row} of this._sparks) {
+            const values = this._history?.series[series] ?? [];
+            const known = values.filter(v => v !== null).length;
+            item.visible = row.item.visible && known >= 2;
+            if (item.visible)
+                area.queue_repaint();
+        }
     }
 
     // ---------------------------------------------------------------- render
@@ -186,6 +273,9 @@ class HeliosIndicator extends PanelMenu.Button {
         this._renderUsage(usage);
         this._renderPower(power);
         this._renderProfile(profile);
+        this._renderSparklines();
+        if (this.menu.isOpen)
+            this._refreshHistory();
     }
 
     _colorFor(level) {

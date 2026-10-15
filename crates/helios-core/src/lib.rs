@@ -7,6 +7,7 @@
 
 pub mod cpu;
 pub mod doctor;
+pub mod history;
 pub mod hwmon;
 pub mod io;
 pub mod nvidia;

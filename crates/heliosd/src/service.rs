@@ -7,9 +7,10 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 use async_io::Timer;
-use helios_core::GpuQuery;
+use helios_core::history::History;
 use helios_core::profile::{self, ProfileError};
 use helios_core::status::{Monitor, Status};
+use helios_core::{Clock, GpuQuery};
 use helios_sys::{NvidiaSmi, RootedFs, SystemClock};
 use zbus::fdo::Properties;
 use zbus::message::Header;
@@ -28,8 +29,9 @@ pub const OBJECT_PATH: &str = "/io/github/pauloeduardods/Helios1";
 pub const SENSORS_IFACE: &str = "io.github.pauloeduardods.Helios1.Sensors";
 pub const PROFILE_IFACE: &str = "io.github.pauloeduardods.Helios1.Profile";
 /// 2 added GpuPower, PowerSource and Battery to Sensors; 3 added CpuPower;
-/// 4 added CpuUsage, CpuFrequency, GpuUsage and Devices.
-pub const API_VERSION: u32 = 4;
+/// 4 added CpuUsage, CpuFrequency, GpuUsage and Devices; 5 added the
+/// GetHistory method.
+pub const API_VERSION: u32 = 5;
 
 /// Firmware profile switches are not instant; do not hammer the EC.
 const MIN_WRITE_GAP: Duration = Duration::from_millis(250);
@@ -61,6 +63,7 @@ pub struct Shared {
     smi: Option<NvidiaSmi>,
     clock: SystemClock,
     monitor: Mutex<Monitor>,
+    history: Mutex<History>,
     published: Mutex<(SensorsProps, ProfileProps)>,
     /// Serializes hardware writes and remembers when the last one happened.
     write_lock: async_lock::Mutex<Option<Instant>>,
@@ -77,7 +80,10 @@ impl Shared {
         let clock = SystemClock::new();
         let mut monitor = Monitor::new(&fs);
         let first = monitor.poll(&fs, smi.as_ref().map(|s| s as &dyn GpuQuery), &clock);
+        let mut history = History::default();
+        history.record(clock.now(), &first);
         Arc::new(Self {
+            history: Mutex::new(history),
             published: Mutex::new(((&first).into(), (&first).into())),
             monitor: Mutex::new(monitor),
             fs,
@@ -88,10 +94,13 @@ impl Shared {
         })
     }
 
-    /// Blocking: may run nvidia-smi (up to its timeout).
+    /// Blocking: may run nvidia-smi (up to its timeout). The result is also
+    /// recorded in the history.
     pub fn poll(&self) -> Status {
         let smi = self.smi.as_ref().map(|s| s as &dyn GpuQuery);
-        lock(&self.monitor).poll(&self.fs, smi, &self.clock)
+        let status = lock(&self.monitor).poll(&self.fs, smi, &self.clock);
+        lock(&self.history).record(self.clock.now(), &status);
+        status
     }
 
     /// Publishes a new snapshot and returns what changed per interface.
@@ -209,6 +218,13 @@ impl SensorsIface {
     #[zbus(property)]
     fn devices(&self) -> Vec<Device> {
         self.0.sensors().devices
+    }
+
+    /// The last five minutes: (ages in seconds before now, oldest first;
+    /// per series: (name, valid flags, values)), all arrays aligned.
+    fn get_history(&self) -> props::HistoryReply {
+        let snapshot = lock(&self.0.history).snapshot(self.0.clock.now());
+        props::history_reply(&snapshot)
     }
 
     #[zbus(property)]

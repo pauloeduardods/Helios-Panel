@@ -2,6 +2,7 @@
 //! The D-Bus shape of a [`Status`], and which properties changed between two
 //! snapshots. Pure: no bus access, unit-tested below.
 
+use helios_core::history::Snapshot;
 use helios_core::hwmon::DeviceKind;
 use helios_core::nvidia::GpuState;
 use helios_core::power::{BatteryState, PowerSource};
@@ -29,6 +30,26 @@ pub type Device = (String, String, f64);
 /// (name, state, %, W, health %, cycles, minutes left); name "" = no battery,
 /// -1 = unknown
 pub type Battery = (String, String, f64, f64, f64, i32, i32);
+
+/// (name, valid flags, values); a value without its flag is 0.
+pub type HistorySeries = (String, Vec<bool>, Vec<f64>);
+/// (ages in seconds, oldest first; every series aligned with them)
+pub type HistoryReply = (Vec<f64>, Vec<HistorySeries>);
+
+pub fn history_reply(snapshot: &Snapshot) -> HistoryReply {
+    let series = snapshot
+        .series
+        .iter()
+        .map(|d| {
+            (
+                d.series.name().to_owned(),
+                d.values.iter().map(Option::is_some).collect(),
+                d.values.iter().map(|v| v.unwrap_or(0.0)).collect(),
+            )
+        })
+        .collect();
+    (snapshot.ages.clone(), series)
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct SensorsProps {
@@ -386,6 +407,23 @@ mod tests {
             .map(|(n, _)| n)
             .collect();
         assert_eq!(names, ["CpuPower"]);
+    }
+
+    #[test]
+    fn history_uses_valid_flags_like_the_properties() {
+        use helios_core::history::History;
+        use helios_core::io::Clock;
+        let fs = FakeFs::new(PHN16_72);
+        let clock = FakeClock::starting_at(10);
+        let mut monitor = Monitor::new(&fs);
+        let mut history = History::default();
+        history.record(clock.now(), &monitor.poll(&fs, None, &clock));
+        clock.advance(2);
+        let (ages, series) = history_reply(&history.snapshot(clock.now()));
+        assert_eq!(ages, [2.0]);
+        assert_eq!(series.len(), 6);
+        assert_eq!(series[0], ("cpu-celsius".into(), vec![true], vec![61.0]));
+        assert_eq!(series[1], ("gpu-celsius".into(), vec![false], vec![0.0]));
     }
 
     #[test]
