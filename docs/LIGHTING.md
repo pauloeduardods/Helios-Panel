@@ -280,13 +280,15 @@ heliosd starts and after a resume.
 ## Extension
 
 Done. A "Lighting" section in the menu, shown only when heliosd exports the
-`Lighting` interface:
+`Lighting` interface, with two submenus that stay collapsed until clicked,
+so the menu stays short:
 
-- **Keyboard**: a submenu with the five effects (the current one marked),
-  then brightness and speed sliders, a direction toggle for the effects that
+- **Keyboard: <effect>**: the five effects (the current one marked), then
+  brightness and speed sliders, a direction toggle for the effects that
   move (wave, shifting) and colour presets for the effects that show a
   colour (breathing, shifting, zoom).
-- **Lid logo**: an on/off switch, then its brightness and colour presets.
+- **Lid logo: On/Off**: an on/off switch, then its brightness and colour
+  presets.
 
 Nothing changes optimistically: the controls follow what heliosd reports
 back. A slider writes once when the user lets go (or per scroll or arrow-key
