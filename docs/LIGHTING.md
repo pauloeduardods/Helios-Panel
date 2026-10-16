@@ -238,8 +238,8 @@ commands, adapted to what is missing):
 
 ```bash
 sudo apt install dkms linux-headers-$(uname -r)   # if not installed yet
-sudo cp -rT kmod/helios-acer-lighting /usr/src/helios-acer-lighting-0.1.6
-sudo dkms install helios-acer-lighting/0.1.6
+sudo cp -rT kmod/helios-acer-lighting /usr/src/helios-acer-lighting-0.3.0
+sudo dkms install helios-acer-lighting/0.3.0
 ```
 
 Then, with Secure Boot **off**, or **on with the DKMS key already

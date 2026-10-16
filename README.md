@@ -9,11 +9,24 @@ Laptop sensors and the platform profile for Linux, with a GNOME Shell top-bar ex
 
 The menu also shows each NVMe or SATA drive's temperature by model name, the Wi-Fi card's temperature, CPU and GPU usage, RAM in use (GiB of the total and percent), the CPU clock (average and fastest core), the battery charge and state, the time left, the battery health (full capacity against the design capacity) the CPU package draw and the NVIDIA GPU's power draw.
 
-It was built for the Acer Predator Helios Neo 16 (PHN16-72), but it works on any PC with sensors in `/sys/class/hwmon`, including Ryzen CPUs and Radeon GPUs.
-
 ```
  [▣ 61°] [▤ off] [◔ Balanced]   ← panel (the default layout; see Settings → Layout)
 ```
+
+## Does it work on my machine?
+
+It was built on the Acer Predator Helios Neo 16 (PHN16-72), but most of it uses standard kernel interfaces and works elsewhere:
+
+| Feature | Works on |
+|---|---|
+| CPU temperature, usage and clock; RAM | any Linux PC: Intel or AMD, laptop or desktop |
+| GPU temperature and usage | NVIDIA (proprietary driver) and AMD Radeon; not Intel graphics yet |
+| Battery, drives, Wi-Fi card | any laptop battery; NVMe and SATA drives; Intel Wi-Fi cards |
+| Power profile switching | any laptop whose kernel driver exposes a platform profile: Acer, ThinkPad, Lenovo, ASUS, HP, Dell… |
+| Fan speeds | Acer Predator and Nitro (`acer_wmi` with `predator_v4=1`) |
+| Keyboard and lid logo lighting | the PHN16-72 only, with an optional kernel module |
+
+Only the PHN16-72 has been tested on real hardware so far. The full list, how to check your machine before installing, and how to report yours are in [docs/HARDWARE.md](docs/HARDWARE.md).
 
 ## How it fits together
 
@@ -26,9 +39,9 @@ Details are in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Requirements
 
-- GNOME Shell 46 to 50 (Ubuntu 24.04 or newer).
+- GNOME Shell 46 to 50, on X11 or Wayland. Developed on Ubuntu 24.04; other distributions with the items below should work.
 - systemd, D-Bus and polkit (standard on Ubuntu).
-- For the power profile: the `acer_wmi` driver loaded with `predator_v4=1`.
+- For the power profile: a kernel driver that exposes `/sys/firmware/acpi/platform_profile`. On Acer Predator and Nitro laptops that is `acer_wmi` loaded with `predator_v4=1`; `heliosctl doctor` shows how to set it.
 - For the NVIDIA temperature: the proprietary driver (which ships `nvidia-smi`).
 - To build: a Rust toolchain ([rustup](https://rustup.rs)).
 
