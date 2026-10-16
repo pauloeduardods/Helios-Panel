@@ -1,5 +1,9 @@
 # Helios Panel
 
+<p align="center">
+  <img src="docs/screenshots/menu.png" width="520" alt="The Helios Panel menu open under the top bar: CPU and GPU temperatures with small graphs, both drives, the Wi-Fi card, two fans, and collapsed sections for usage, power, the power profile, the keyboard and the lid logo">
+</p>
+
 Laptop sensors and the platform profile for Linux, with a GNOME Shell top-bar extension. It shows, next to Wi-Fi and the keyboard layout:
 
 - the **CPU** and **GPU** temperature, changing color as they heat up;
@@ -9,9 +13,9 @@ Laptop sensors and the platform profile for Linux, with a GNOME Shell top-bar ex
 
 The menu also shows each NVMe or SATA drive's temperature by model name, the Wi-Fi card's temperature, CPU and GPU usage, RAM in use (GiB of the total and percent), the CPU clock (average and fastest core), the battery charge and state, the time left, the battery health (full capacity against the design capacity) the CPU package draw and the NVIDIA GPU's power draw.
 
-```
- [▣ 61°] [▤ off] [◔ Balanced]   ← panel (the default layout; see Settings → Layout)
-```
+![The top bar: CPU temperature, GPU temperature, CPU and GPU usage, RAM used of total, each with a graph, then the power profile](docs/screenshots/top-bar.png)
+
+This is one layout among many: what it shows, in what order and with which graphs is up to you (see Settings → Layout below).
 
 ## Does it work on my machine?
 
@@ -67,6 +71,19 @@ To configure it, open the extension menu → **Settings**, or run `gnome-extensi
 - **Import and export** the layout as a JSON file, to back it up or share it.
 
 The **Colors** page sets the **warm and hot thresholds** and their colors, shared by the top bar, its graphs and the menu. Layouts from before this page existed are converted once, on first run, so nothing you set up is lost.
+
+<table>
+  <tr>
+    <td><img src="docs/screenshots/settings-layout.png" alt="Settings, Layout page: a live preview of the top bar, the list of segments, presets and layout import and export"></td>
+    <td><img src="docs/screenshots/settings-colors.png" alt="Settings, Colors page: warm and hot thresholds for the CPU and GPU and the colors for each level"></td>
+    <td><img src="docs/screenshots/settings-alerts.png" alt="Settings, Alerts page: heat alert, low battery hint and the profile to use when unplugged"></td>
+  </tr>
+  <tr>
+    <td align="center">Layout</td>
+    <td align="center">Colors</td>
+    <td align="center">Alerts</td>
+  </tr>
+</table>
 
 ### Alerts
 
