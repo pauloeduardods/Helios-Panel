@@ -83,6 +83,16 @@ refuses to load on any machine but the **Predator PHN16-72** (a DMI
 allow-list). Without it, the lighting section is hidden and everything else
 works. See [LIGHTING.md](LIGHTING.md) for how it works and how to install it.
 
+With Secure Boot on, the module has to be signed. If your machine has no
+Machine Owner Key (MOK) enrolled yet, installing it takes a one-time step:
+`mokutil` asks you to choose a password, and on the next boot a blue "MOK
+management" screen asks for it to enroll the key. After that the module
+loads by itself on every boot, including after kernel updates, and the
+password is never needed again. With Secure Boot off, or with a key already
+enrolled (for example by `nvidia-dkms` or VirtualBox), there is no extra
+step. The enrolment can be undone with `mokutil --delete`; the steps are in
+[LIGHTING.md](LIGHTING.md#installing-it).
+
 Sibling models (other Helios Neo 16 or Helios 16 generations) may share the
 same firmware interface, but the module is not enabled for them until
 someone tests it on one. Opening an issue with your model is the way to

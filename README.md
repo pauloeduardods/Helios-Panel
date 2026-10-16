@@ -24,7 +24,7 @@ It was built on the Acer Predator Helios Neo 16 (PHN16-72), but most of it uses 
 | Battery, drives, Wi-Fi card | any laptop battery; NVMe and SATA drives; Intel Wi-Fi cards |
 | Power profile switching | any laptop whose kernel driver exposes a platform profile: Acer, ThinkPad, Lenovo, ASUS, HP, Dell… |
 | Fan speeds | Acer Predator and Nitro (`acer_wmi` with `predator_v4=1`) |
-| Keyboard and lid logo lighting | the PHN16-72 only, with an optional kernel module |
+| Keyboard and lid logo lighting | the PHN16-72 only, with an optional kernel module (on Secure Boot machines, a one-time key enrolment and reboot) |
 
 Only the PHN16-72 has been tested on real hardware so far. The full list, how to check your machine before installing, and how to report yours are in [docs/HARDWARE.md](docs/HARDWARE.md).
 
@@ -32,7 +32,7 @@ Only the PHN16-72 has been tested on real hardware so far. The full list, how to
 
 - **heliosd**: a small system service. It reads the sensors, publishes them on the system D-Bus and is the only part that changes the platform profile, and only after polkit allows it. It runs sandboxed by systemd, with no capabilities.
 - **heliosctl**: a command-line client (`heliosctl status`).
-- **helios-acer-lighting** (optional): a small kernel module for the PHN16-72's keyboard RGB effects and lid logo, which Linux does not support yet. Helios never installs or loads it; `heliosctl doctor` prints the commands, and [docs/LIGHTING.md](docs/LIGHTING.md) explains them.
+- **helios-acer-lighting** (optional): a small kernel module for the PHN16-72's keyboard RGB effects and lid logo, which Linux does not support yet. Helios never installs or loads it; `heliosctl doctor` prints the commands, and [docs/LIGHTING.md](docs/LIGHTING.md) explains them. With Secure Boot on, the module must be signed: if no Machine Owner Key is enrolled yet, installing it takes a one-time key enrolment, with a password you choose and a reboot to confirm it on a blue boot screen ([the steps](docs/LIGHTING.md#installing-it)). With Secure Boot off, or a key already enrolled (for example by `nvidia-dkms` or VirtualBox), there is no extra step.
 - **The GNOME extension**: draws what heliosd publishes. It never runs anything as root, never reads `/sys` and never spawns processes. Without heliosd it shows `helios off`.
 
 Details are in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
